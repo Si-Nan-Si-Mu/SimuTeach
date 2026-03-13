@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>师范生教学技能训练智能体</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- 顶部栏 -->
+  <header class="top-header">
+    <div class="header-left">
+      <button type="button" class="icon-btn back-btn" aria-label="返回">←</button>
+    </div>
+    <h1 class="header-brand">师范生教学技能训练智能体</h1>
+    <div class="header-right">
+      <button type="button" class="icon-btn" aria-label="分享">⎘</button>
+      <button type="button" class="icon-btn" aria-label="保存">↓</button>
+      <div class="speaking-tip">正在讲话：<span id="speakingName">—</span></div>
+    </div>
+  </header>
+xx
+  <div class="app-body">
+    <!-- 左侧导航 -->
+    <nav class="sidebar">
+      <div class="sidebar-logo">
+        <span class="logo-icon">☁</span>
+        <span class="logo-text">腾讯云</span>
+      </div>
+      <ul class="nav-list">
+        <li class="nav-item active"><span class="nav-icon">📋</span>实训工作台</li>
+        <li class="nav-item"><span class="nav-icon">🎬</span>智能情境仿真</li>
+        <li class="nav-item"><span class="nav-icon">📊</span>诊断报告中心</li>
+        <li class="nav-item"><span class="nav-icon">📈</span>个性化路径</li>
+        <li class="nav-item"><span class="nav-icon">📚</span>教学资源库</li>
+        <li class="nav-item"><span class="nav-icon">⚙</span>用户设置</li>
+      </ul>
+    </nav>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 学生角色卡片 -->
+      <section class="student-profiles">
+        <div class="profile-card selected" data-role="naughty">
+          <div class="profile-avatar">
+            <img src="/assets/student_naughty.png" alt="小明" class="profile-avatar-img">
+          </div>
+          <div class="profile-info">
+            <span class="profile-type">调皮型</span>
+            <span class="profile-name">小明</span>
+          </div>
+        </div>
+        <div class="profile-card" data-role="shy">
+          <div class="profile-avatar">
+            <img src="/assets/student_shy.png" alt="小红" class="profile-avatar-img">
+          </div>
+          <div class="profile-info">
+            <span class="profile-type">内向型</span>
+            <span class="profile-name">小红</span>
+          </div>
+        </div>
+        <div class="profile-card" data-role="struggling">
+          <div class="profile-avatar">
+            <img src="/assets/student_struggling.png" alt="小强" class="profile-avatar-img">
+          </div>
+          <div class="profile-info">
+            <span class="profile-type">学困型</span>
+            <span class="profile-name">小强</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 进行中的实训 -->
+      <section class="training-section">
+        <h2 class="section-title">进行中的实训</h2>
+
+        <div class="training-main">
+          <!-- 仿真区 -->
+          <div class="simulation-area">
+            <div class="sim-tabs">
+              <button type="button" class="sim-tab active">智能情境仿真</button>
+              <button type="button" class="sim-tab">实时反馈</button>
+            </div>
+            <div class="sim-player">
+              <span class="live-badge">LIVE</span>
+              <div class="sim-scene">
+                <div class="teacher-area">
+                  <div class="teacher-figure">
+                    <div class="teacher-head"></div>
+                    <div class="teacher-body"></div>
+                    <div class="teacher-arm"></div>
+                  </div>
+                </div>
+                <div class="screen-area">
+                  <div class="screen-students">
+                    <div class="screen-student" data-role="naughty">
+                      <img src="/assets/student_naughty.png" alt="小明" class="ss-avatar-img">
+                      <span class="ss-name">小明</span>
+                    </div>
+                    <div class="screen-student" data-role="shy">
+                      <img src="/assets/student_shy.png" alt="小红" class="ss-avatar-img">
+                      <span class="ss-name">小红</span>
+                    </div>
+                    <div class="screen-student" data-role="struggling">
+                      <img src="/assets/student_struggling.png" alt="小强" class="ss-avatar-img">
+                      <span class="ss-name">小强</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="desks-foreground">
+                  <div class="desk-unit" data-role="naughty">
+                    <img src="/assets/student_naughty.png" alt="小明" class="student-back-img">
+                    <div class="desk"></div>
+                    <div class="speech-bubble"></div>
+                  </div>
+                  <div class="desk-unit" data-role="shy">
+                    <img src="/assets/student_shy.png" alt="小红" class="student-back-img">
+                    <div class="desk"></div>
+                    <div class="speech-bubble"></div>
+                  </div>
+                  <div class="desk-unit" data-role="struggling">
+                    <img src="/assets/student_naughty.png" alt="小强" class="student-back-img">
+                    <div class="desk"></div>
+                    <div class="speech-bubble"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="system-controls">
+                <button type="button" id="btnStart" class="sys-btn sys-btn-start" disabled>系统启动</button>
+                <button type="button" id="btnPause" class="sys-btn sys-btn-pause">暂停</button>
+                <button type="button" id="btnStop" class="sys-btn sys-btn-stop">系统终止</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 实时反馈 -->
+          <aside class="feedback-panel">
+            <h3 class="feedback-title">实时反馈</h3>
+            <div class="gauges">
+              <div class="gauge-item">
+                <div class="gauge-ring gauge-blue"><span class="gauge-val">75</span>%</div>
+                <span class="gauge-label">互动性</span>
+              </div>
+              <div class="gauge-item">
+                <div class="gauge-ring gauge-cyan"><span class="gauge-val">88</span>%</div>
+                <span class="gauge-label">清晰度</span>
+              </div>
+              <div class="gauge-item">
+                <div class="gauge-ring gauge-orange"><span class="gauge-val">82</span>%</div>
+                <span class="gauge-label">耐心度</span>
+              </div>
+              <div class="gauge-item">
+                <div class="gauge-ring gauge-green"><span class="gauge-val">90</span>%</div>
+                <span class="gauge-label">肢体语言</span>
+              </div>
+            </div>
+            <div class="realtime-suggestion">
+              <strong>实时建议：</strong>对内向学生增加鼓励
+            </div>
+            <div class="chat-panel">
+              <div class="chat-header">对话记录</div>
+              <div id="chatHistory" class="chat-history"></div>
+              <div class="input-wrap">
+                <input type="text" id="messageInput" class="message-input" placeholder="输入你的话..." maxlength="500" autocomplete="off">
+                <button type="button" id="sendBtn" class="send-btn">发送</button>
+              </div>
+            </div>
+            <button type="button" id="newSessionBtn" class="btn-start-new">开始新仿真</button>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 底部：薄弱点与训练路径 -->
+      <section class="bottom-section">
+        <div class="weakness-panel">
+          <h3 class="panel-title">主要薄弱点</h3>
+          <ul class="weakness-list">
+            <li><span class="weak-icon">👥</span>学困生互动不足</li>
+            <li><span class="weak-icon">🧠</span>知识点衔接不够流畅</li>
+          </ul>
+          <p class="weakness-note">下方动态生成了推荐的"个性化训练路径"</p>
+        </div>
+        <div class="path-panel">
+          <h3 class="panel-title">个性化训练路径</h3>
+          <p class="path-subtitle">建议优先完成：</p>
+          <div class="path-flow">
+            <div class="path-step">针对学困生的提问策略</div>
+            <span class="path-arrow">→</span>
+            <div class="path-step">知识点衔接技巧训练</div>
+            <span class="path-arrow">→</span>
+            <div class="path-step">情境模拟挑战 (调皮/内向)</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <a id="reportLink" href="report.html" class="btn-primary">查看报告</a>
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

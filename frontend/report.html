@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>试讲报告 - 师范生试讲训练系统</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <style>
+    .report-page { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
+    .report-header { margin-bottom: 1.5rem; }
+    .report-section { background: var(--bg-card); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; box-shadow: var(--shadow); }
+    .report-section h3 { font-size: 1rem; color: var(--accent); margin-bottom: 0.75rem; }
+    .tag-cloud { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .tag { padding: 0.35rem 0.75rem; background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 0.85rem; }
+    .metric-row { display: flex; gap: 2rem; flex-wrap: wrap; }
+    .metric { font-size: 0.9rem; color: var(--text-secondary); }
+    .metric strong { color: var(--text-primary); }
+    .chart-wrap { height: 240px; }
+    .loading-msg { color: var(--text-secondary); padding: 2rem; text-align: center; }
+    .back-btn { display: inline-block; margin-bottom: 1rem; padding: 0.5rem 1rem; background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-sm); text-decoration: none; font-size: 0.9rem; transition: all 0.2s; }
+    .back-btn:hover { background: var(--accent-soft); }
+  </style>
+</head>
+<body>
+  <div class="report-page">
+    <a href="index.html" class="back-btn">← 返回对话</a>
+    <header class="report-header">
+      <h1 class="title">试讲报告</h1>
+      <p id="sessionDisplay" class="user-info">会话ID: -</p>
+    </header>
+
+    <section id="loadingSection" class="report-section">
+      <p class="loading-msg">报告生成中，请稍后...</p>
+    </section>
+
+    <section id="reportContent" class="report-content" style="display: none;">
+      <div class="report-section">
+        <h3>情感分析</h3>
+        <div id="emotionChart" class="chart-wrap"></div>
+      </div>
+      <div class="report-section">
+        <h3>教学策略标签</h3>
+        <div id="strategyTags" class="tag-cloud"></div>
+      </div>
+      <div class="report-section">
+        <h3>语言复杂度</h3>
+        <div id="complexityMetrics" class="metric-row"></div>
+      </div>
+      <div class="report-section">
+        <h3>建议与总结</h3>
+        <p id="summaryText" class="user-info">-</p>
+      </div>
+    </section>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="report.js"></script>
+</body>
+</html>
