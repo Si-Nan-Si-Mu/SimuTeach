@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎓 师范生数字学生仿真训练系统</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- 在 ECharts 加载前为 wheel/mousewheel 默认加 passive，消除 Violation 并提升滚动流畅度 -->
+  <script>
+(function() {
+  var supportsPassive = false;
+  try {
+    var opts = Object.defineProperty({}, 'passive', { get: function() { supportsPassive = true; } });
+    window.addEventListener('test', null, opts);
+  } catch (e) {}
+  if (!supportsPassive) return;
+  var add = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function(type, fn, capture) {
+    var cap = capture;
+    if (type === 'wheel' || type === 'mousewheel') {
+      cap = typeof capture === 'object' ? (capture.passive === false ? capture : Object.assign({}, capture, { passive: true })) : { passive: true, capture: !!capture };
+    }
+    return add.call(this, type, fn, cap);
+  };
+})();
+  </script>
+  <!-- 使用本地 ECharts，避免 CDN 被浏览器「跟踪防护」拦截导致无法访问 storage -->
+  <script src="js/echarts.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- ========== 左侧：角色选择栏 ========== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">🎓 SimuTeach</h1>
+        <p class="logo-sub">数字学生仿真训练</p>
+      </div>
+
+      <div class="sidebar-section-title">选择训练对象</div>
+      <div class="character-list" id="character-list"></div>
+
+      <div class="sidebar-actions">
+        <button class="sidebar-btn" id="btn-profile">
+          <span>📋</span> 查看角色档案
+        </button>
+        <button class="sidebar-btn" id="btn-workflow-data">
+          <span>📁</span> 工作流数据
+        </button>
+        <button class="sidebar-btn btn-danger" id="btn-report">
+          <span>📊</span> 结束 · 生成报告
+        </button>
+      </div>
+
+      <div class="sidebar-footer">
+        <p>仿真 · 诊断 · 提升</p>
+        <p class="version">v1.0.0</p>
+      </div>
+    </aside>
+
+    <!-- ========== 中间：核心对话区 ========== -->
+    <main class="chat-main">
+      <div class="chat-area" id="chat-area">
+        <div class="chat-header">
+          <div class="chat-header-left">
+            <h2 id="chat-header-name">😔 李大志</h2>
+            <span class="chat-header-badge" id="chat-header-type">习得性无助型</span>
+          </div>
+          <div class="chat-header-right">
+            <span class="live-dot"></span>
+            <span>仿真对话中</span>
+          </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages"></div>
+
+        <div class="chat-input-area">
+          <div class="quick-phrases">
+            <button class="quick-btn" data-trigger="提问" data-text="来，这道题你来回答一下？">✋ 提问</button>
+            <button class="quick-btn" data-trigger="鼓励" data-text="你做得很好，老师为你感到骄傲！">👏 鼓励</button>
+            <button class="quick-btn" data-trigger="批评" data-text="你这样做是不对的，需要改正。">😤 批评</button>
+            <button class="quick-btn" data-trigger="安抚" data-text="没关系，老师不会怪你的，慢慢来。">🤗 安抚</button>
+            <button class="quick-btn" data-trigger="互动" data-text="我们一起来讨论一下这个问题好不好？">💬 互动</button>
+          </div>
+          <div class="input-row">
+            <input type="text" id="chat-input" placeholder="输入你想对学生说的话…" autocomplete="off">
+            <button class="send-btn" id="send-btn">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ========== 右侧：数据分析看板 ========== -->
+    <aside class="dashboard">
+      <div class="dash-header">
+        <h2>📊 实时情绪监测</h2>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">当前状态</div>
+        <div class="status-badge-wrap">
+          <span class="status-badge" id="emotion-status">😐 状态一般</span>
+        </div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">情绪指标</div>
+        <div class="emotion-bars">
+          <div class="emo-bar-item">
+            <div class="emo-bar-label">
+              <span>😊 愉悦度</span>
+              <span class="emo-bar-val" id="val-joy">20</span>
+            </div>
+            <div class="emo-bar-track">
+              <div class="emo-bar-fill" id="bar-joy" style="width:20%;background:linear-gradient(90deg,#2ecc71aa,#2ecc71)"></div>
+            </div>
+          </div>
+          <div class="emo-bar-item">
+            <div class="emo-bar-label">
+              <span>⚡ 激活度</span>
+              <span class="emo-bar-val" id="val-activation">15</span>
+            </div>
+            <div class="emo-bar-track">
+              <div class="emo-bar-fill" id="bar-activation" style="width:15%;background:linear-gradient(90deg,#3498dbaa,#3498db)"></div>
+            </div>
+          </div>
+          <div class="emo-bar-item">
+            <div class="emo-bar-label">
+              <span>😰 焦虑度</span>
+              <span class="emo-bar-val" id="val-anxiety">75</span>
+            </div>
+            <div class="emo-bar-track">
+              <div class="emo-bar-fill" id="bar-anxiety" style="width:75%;background:linear-gradient(90deg,#e74c3caa,#e74c3c)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">🧭 个性化路径分析</div>
+        <div class="path-compare" id="path-compare"></div>
+        <div class="path-warning-area" id="path-warning-area"></div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">五维人格画像</div>
+        <div id="personality-radar" style="width:100%;height:200px;"></div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">情绪波动曲线</div>
+        <div id="emotion-chart" style="width:100%;height:200px;"></div>
+      </div>
+    </aside>
+
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/request.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/emotion.js"></script>
+  <script src="js/report.js"></script>
+  <script src="js/workflow.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

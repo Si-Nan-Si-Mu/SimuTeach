@@ -1,9 +1,11 @@
 # 配置与密钥（不提交）
 config.json
 config_zhangyiming.json
+config_example_student.json
 config_linnuan.json
 config_lidazhi.json
 frontend/config.js
+scripts/.bot_app_key
 .env
 .env.*
 
