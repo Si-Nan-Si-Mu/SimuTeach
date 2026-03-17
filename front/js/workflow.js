@@ -57,6 +57,10 @@ function appendWorkflowReplyToDialog(str, replyId) {
   const msgEl = document.createElement('div');
   msgEl.id = id;
   msgEl.className = 'message workflow-msg fade-in';
+  // 兜底逻辑下的智能体消息同样绑定到当前学生，方便切换人格时过滤
+  if (window.App && App.currentCharacter) {
+    msgEl.dataset.characterId = App.currentCharacter.id;
+  }
   msgEl.innerHTML = '<div class="msg-avatar workflow-avatar">🤖</div><div class="msg-bubble workflow-bubble"><div class="msg-label">智能体</div><div class="msg-text">' + _escapeHtml(str) + '</div></div>';
   const textEl = msgEl.querySelector('.msg-text');
   if (textEl) {
@@ -65,6 +69,215 @@ function appendWorkflowReplyToDialog(str, replyId) {
   }
   container.appendChild(msgEl);
   container.scrollTop = container.scrollHeight;
+}
+
+function _clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function _clamp01(n) {
+  return _clamp(n, 0, 1);
+}
+
+function _maybeUpdateEmotionFromJsonText(jsonText) {
+  if (!jsonText || typeof jsonText !== 'string') return;
+  const t = jsonText.trim();
+  if (!(t.startsWith('{') && t.endsWith('}'))) return;
+  // 快速过滤，避免每段都 JSON.parse
+  if (t.indexOf('"x-debug"') < 0 && t.indexOf('"x_debug"') < 0) return;
+
+  let obj;
+  try {
+    obj = JSON.parse(t);
+  } catch (_) {
+    return;
+  }
+
+  const xd = obj['x-debug'] || obj['x_debug'];
+  if (!xd || typeof xd !== 'object') return;
+
+  const em = xd.emotion || {};
+  const es = xd.emotion_state || {};
+
+  const intensity = _clamp01(Number(em.intensity));
+  const arousal = _clamp01(Number(es.arousal));
+  const valence = _clamp(Number(es.valence), -1, 1);
+
+  // 映射到右侧面板的三项（0-100）
+  const joy = _clamp(((valence + 1) / 2) * 100, 0, 100);
+  const activation = _clamp(arousal * 100, 0, 100);
+  const anxietyBase = _clamp(((-valence + arousal) / 2) * 100, 0, 100);
+  const anxiety = _clamp(anxietyBase * (0.6 + 0.4 * intensity), 0, 100);
+
+  const mapped = { joy, activation, anxiety };
+
+  // 在前端终端中输出一次本次情绪解析与可视化结果
+  try {
+    console.log(
+      '[Workflow] 情绪可视化更新:',
+      'joy =', Math.round(mapped.joy),
+      'activation =', Math.round(mapped.activation),
+      'anxiety =', Math.round(mapped.anxiety),
+      '| intensity =', intensity.toFixed(3),
+      'arousal =', arousal.toFixed(3),
+      'valence =', valence.toFixed(3)
+    );
+  } catch (_) {}
+
+  // 同步到全局状态与右侧可视化
+  if (window.App) {
+    window.App.currentEmotion = { ...(window.App.currentEmotion || {}), ...mapped };
+  }
+  if (typeof window.EmotionDashboard !== 'undefined' && window.EmotionDashboard) {
+    try {
+      window.EmotionDashboard.updateBars(mapped);
+      window.EmotionDashboard.pushHistory(mapped);
+    } catch (e) {
+      console.warn('[Workflow] EmotionDashboard update failed:', e);
+    }
+  }
+}
+
+// 从工作流返回的 JSON 文本中同时提取「对话回复」与情绪信息
+// JSON 形如：
+// {
+//   "choices":[{"message":{"content":"……","role":"assistant"}}],
+//   "model":"李大志",
+//   "x-debug":{"emotion":{...},"emotion_state":{...}}
+// }
+function _extractDialogAndEmotionFromContent(jsonText) {
+  if (!jsonText || typeof jsonText !== 'string') return '';
+  // 去掉前后可能存在的零宽字符 / BOM，再进行 JSON 判定
+  let t = jsonText.replace(/^[\uFEFF\u200B-\u200D\u2060]+/, '').replace(/[\uFEFF\u200B-\u200D\u2060]+$/, '').trim();
+  if (!(t.startsWith('{') && t.endsWith('}'))) return '';
+  let obj;
+  try {
+    obj = JSON.parse(t);
+  } catch (_) {
+    return '';
+  }
+
+  // 1）先取出对话文字
+  let dialog = '';
+  if (Array.isArray(obj.choices) && obj.choices[0] && obj.choices[0].message) {
+    const msg = obj.choices[0].message;
+    if (typeof msg.content === 'string') dialog = msg.content;
+  }
+
+  // 2）提取情绪并更新右侧可视化
+  const xd = obj['x-debug'] || obj['x_debug'];
+  if (xd && typeof xd === 'object') {
+    const em = xd.emotion || {};
+    const es = xd.emotion_state || {};
+    const intensity = _clamp01(Number(em.intensity));
+    const arousal = _clamp01(Number(es.arousal));
+    const valence = _clamp(Number(es.valence), -1, 1);
+
+    const joy = _clamp(((valence + 1) / 2) * 100, 0, 100);
+    const activation = _clamp(arousal * 100, 0, 100);
+    const anxietyBase = _clamp(((-valence + arousal) / 2) * 100, 0, 100);
+    const anxiety = _clamp(anxietyBase * (0.6 + 0.4 * intensity), 0, 100);
+    const mapped = { joy, activation, anxiety };
+
+    try {
+      console.log(
+        '[Workflow] 情绪可视化更新:',
+        'joy =', Math.round(mapped.joy),
+        'activation =', Math.round(mapped.activation),
+        'anxiety =', Math.round(mapped.anxiety),
+        '| intensity =', intensity.toFixed(3),
+        'arousal =', arousal.toFixed(3),
+        'valence =', valence.toFixed(3)
+      );
+    } catch (_) {}
+
+    if (window.App) {
+      window.App.currentEmotion = { ...(window.App.currentEmotion || {}), ...mapped };
+      const cur = window.App.currentCharacter;
+      if (cur && cur.id) {
+        // 1）将本次情绪点追加到当前角色的情绪历史缓存中，供切换角色时各自独立展示
+        const storeMap = window.App.emotionHistoriesByChar || (window.App.emotionHistoriesByChar = {});
+        const store = storeMap[cur.id] || (storeMap[cur.id] = { joy: [], activation: [], anxiety: [], labels: [], tick: 0 });
+        store.tick += 1;
+        const label = `T${store.tick}`;
+        store.labels.push(label);
+        store.joy.push(Math.round(joy));
+        store.activation.push(Math.round(activation));
+        store.anxiety.push(Math.round(anxiety));
+        const maxLen = 15;
+        if (store.labels.length > maxLen) {
+          store.labels.shift();
+          store.joy.shift();
+          store.activation.shift();
+          store.anxiety.shift();
+        }
+
+        // 2）根据情绪微调当前角色的五维人格画像（轻量级渐变）
+        const traitsMap = window.App.dynamicTraitsByChar || (window.App.dynamicTraitsByChar = {});
+        const baseTraits = traitsMap[cur.id] || { ...(cur.traits || {}) };
+        traitsMap[cur.id] = baseTraits;
+
+        const center = 50;
+        const kStrong = 6;   // 影响强度（数值越小单次变化越大）
+        const kWeak = 8;
+
+        // 愉悦度越高，自信心 / 学习动力略微提升，焦虑度略微下降
+        baseTraits.confidence = _clamp(
+          (baseTraits.confidence ?? center) + (joy - center) / kStrong,
+          0,
+          100
+        );
+        baseTraits.motivation = _clamp(
+          (baseTraits.motivation ?? center) + (joy - center) / kWeak,
+          0,
+          100
+        );
+
+        // 激活度影响表达力：高激活 → 表达力上升，低激活 → 稍微下降
+        baseTraits.expressiveness = _clamp(
+          (baseTraits.expressiveness ?? center) + (activation - center) / kStrong,
+          0,
+          100
+        );
+
+        // 焦虑度直接映射到五维里的「焦虑度」
+        baseTraits.anxiety = _clamp(
+          (baseTraits.anxiety ?? center) + (anxiety - center) / kStrong,
+          0,
+          100
+        );
+
+        // 焦虑越高，社交能力略微下降；焦虑低时略微回升
+        baseTraits.socialSkill = _clamp(
+          (baseTraits.socialSkill ?? center) - (anxiety - center) / kWeak,
+          0,
+          100
+        );
+
+        // 实时更新当前角色的雷达图（使用动态 traits）
+        if (typeof window.EmotionDashboard !== 'undefined' && window.EmotionDashboard) {
+          try {
+            window.EmotionDashboard.updateRadarChart({
+              ...cur,
+              traits: baseTraits,
+            });
+          } catch (e) {
+            console.warn('[Workflow] updateRadarChart with dynamic traits failed:', e);
+          }
+        }
+      }
+    }
+    if (typeof window.EmotionDashboard !== 'undefined' && window.EmotionDashboard) {
+      try {
+        window.EmotionDashboard.updateBars(mapped);
+        window.EmotionDashboard.pushHistory(mapped);
+      } catch (e) {
+        console.warn('[Workflow] EmotionDashboard update failed:', e);
+      }
+    }
+  }
+
+  return typeof dialog === 'string' ? dialog : '';
 }
 
 const WorkflowClient = {
@@ -101,27 +314,37 @@ const WorkflowClient = {
 
   /**
    * 构造 HTTP SSE 请求体（与文档 1.1 一致），统一 UTF-8 编码
+   * - model 保留在 custom_variables.model，便于工作流在「开始」节点里从自定义变量读取
+   *   （若需要，也会额外复制一份到顶层 body.model，兼容后端其它使用方式）
    */
   buildRequestBody(content, sessionId, customVariables = {}) {
     const sid = this.normalizeSessionId(sessionId);
     let requestId = 'req_' + sid + '_' + Date.now();
     if (requestId.length > 255) requestId = requestId.slice(-255);
     const contentStr = this.ensureUtf8String(content || '');
-    return {
+    const model = customVariables && customVariables.model ? this.ensureUtf8String(customVariables.model) : '';
+    const body = {
       request_id: requestId,
+      // content 是对话端标准字段；同时增加 message 字段，方便工作流「开始」节点按 message 读取
       content: contentStr,
+      message: contentStr,
       session_id: sid,
       bot_app_key: WORKFLOW_CONFIG.botAppKey,
       visitor_biz_id: this.ensureUtf8String(WORKFLOW_CONFIG.visitorBizId).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'teacher-001',
       incremental: true,
       streaming_throttle: 10,
       visitor_labels: [],
+      // 注意：这里不会把 model 从 custom_variables 中移除，方便工作流在开始节点中通过自定义变量拿到 model
       custom_variables: this.stringifyCustomVariables(customVariables),
       search_network: 'disable',
       stream: 'enable',
       workflow_status: WORKFLOW_CONFIG.workflowStatus,
       tcadp_user_id: '',
     };
+    if (model) {
+      body.model = model;
+    }
+    return body;
   },
 
   /**
@@ -225,6 +448,13 @@ const WorkflowClient = {
               const type = (payload && payload.type) || eventType;
               const p = payload && payload.payload != null ? payload.payload : payload;
 
+              // 在前端终端完整输出本次工作流返回的数据，便于调试（仅在 debug 模式下）
+              try {
+                if (WORKFLOW_CONFIG.debug && window.console && console.log) {
+                  console.log('[Workflow][RawPayload]', JSON.stringify(payload, null, 2));
+                }
+              } catch (_) {}
+
               if (type === 'error' || eventType === 'error') {
                 const err = payload.error || (p && (p.error || p));
                 const errObj = err && typeof err === 'object' ? err : { message: String(err || '工作流调用出错') };
@@ -244,7 +474,17 @@ const WorkflowClient = {
                 continue;
               }
 
-              let text = extractContent(p) || extractContent(payload);
+              // 优先从工作流返回的 JSON 文本中提取对话与情绪（choices[..].message.content + x-debug）
+              const rawCandidate =
+                (p && typeof p.content === 'string' ? p.content : '') ||
+                (payload && typeof payload.content === 'string' ? payload.content : '') ||
+                '';
+              let text = _extractDialogAndEmotionFromContent(rawCandidate);
+
+              // 如果不是 JSON 或解析失败，退回到通用内容提取逻辑
+              if (!text) {
+                text = extractContent(p) || extractContent(payload);
+              }
               if (typeof text !== 'string') text = '';
               const isReply = (type === 'reply' || eventType === 'reply');
               let toShow = '';
@@ -313,6 +553,12 @@ const WorkflowClient = {
         role: 'teacher',
         ...extra,
       });
+      // 在前端控制台完整输出发送给工作流的 JSON 请求体，便于排查 model / messages 等字段
+      try {
+        console.log('[Workflow][RequestBody]', JSON.stringify(body, null, 2));
+      } catch (_) {
+        console.log('[Workflow][RequestBody]', body);
+      }
       _wfLog('fetch 开始 POST', url, 'body.session_id:', body.session_id, 'body.content 长度:', body.content.length);
 
       const jsonString = JSON.stringify(body);
@@ -409,6 +655,48 @@ const WorkflowClient = {
       return this.sendTeacherMessageToWorkflow(sessionId, message, extra);
     }
     return null;
+  },
+
+  /**
+   * 人格切换：仅向工作流发送 model，不在主对话框里展示
+   * - modelName 使用中文，如「习得性无助型」「注意力分散型」
+   */
+  async sendModelSwitch(sessionId, modelName) {
+    const url = WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint;
+    _wfLog('准备发送人格切换请求', 'model:', modelName, 'sessionId:', sessionId, 'url:', url);
+    if (!url || !modelName) return;
+
+    try {
+      // 将「人格切换」作为 content 字段传入，以满足后端对 content 的必填校验
+      const body = this.buildRequestBody('人格切换', sessionId, {
+        role: 'persona_switch',
+        model: modelName,
+      });
+      try {
+        console.log('[Workflow][PersonaSwitchBody]', JSON.stringify(body, null, 2));
+      } catch (_) {
+        console.log('[Workflow][PersonaSwitchBody]', body);
+      }
+      const jsonString = JSON.stringify(body);
+      const utf8Bytes = new TextEncoder().encode(jsonString);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Accept': 'text/event-stream; charset=utf-8',
+        },
+        body: utf8Bytes,
+      });
+      const text = await res.text();
+      if (WORKFLOW_CONFIG.debug && window.console && console.log) {
+        // 仅在 debug 模式下输出简要状态，避免在控制台刷出完整 SSE 内容
+        console.log('[Workflow] 人格切换完成，status =', res.status, 'model =', modelName);
+      }
+      return text;
+    } catch (e) {
+      console.warn('[Workflow] sendModelSwitch failed:', e);
+      return null;
+    }
   },
 
   /**

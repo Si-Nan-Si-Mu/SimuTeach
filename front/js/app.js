@@ -128,6 +128,10 @@ const App = {
   sessionActive: false,
   sessionId: null,
   emotionSnapshots: [],
+  // 为每个角色单独存储情绪历史，确保情绪可视化互不干扰
+  emotionHistoriesByChar: {},
+  // 为每个角色维护一份「动态五维画像」，在对话过程中根据情绪微调
+  dynamicTraitsByChar: {},
 
   init() {
     this.renderCharacterCards();
@@ -167,6 +171,20 @@ const App = {
   },
 
   selectCharacter(id) {
+    // 切换前先把当前角色的情绪历史缓存下来
+    if (this.currentCharacter && window.EmotionDashboard) {
+      const prevId = this.currentCharacter.id;
+      const eh = EmotionDashboard.emotionHistory || { joy: [], activation: [], anxiety: [] };
+      const labels = EmotionDashboard.timeLabels || [];
+      this.emotionHistoriesByChar[prevId] = {
+        joy: [...eh.joy],
+        activation: [...eh.activation],
+        anxiety: [...eh.anxiety],
+        labels: [...labels],
+        tick: EmotionDashboard.tickCount || labels.length || 0,
+      };
+    }
+
     const char = CHARACTERS[id];
     if (!char) return;
 
@@ -204,13 +222,61 @@ const App = {
       }
     });
 
+    // 为当前学生加载各自独立的情绪历史
+    const stored = this.emotionHistoriesByChar[id];
     EmotionDashboard.resetHistory();
-    EmotionDashboard.updateBars(this.currentEmotion);
-    EmotionDashboard.pushHistory(this.currentEmotion);
-    EmotionDashboard.updateRadarChart(char);
+    if (stored && stored.labels && stored.labels.length) {
+      EmotionDashboard.emotionHistory = {
+        joy: [...stored.joy],
+        activation: [...stored.activation],
+        anxiety: [...stored.anxiety],
+      };
+      EmotionDashboard.timeLabels = [...stored.labels];
+      EmotionDashboard.tickCount = stored.tick || stored.labels.length || 0;
+      if (EmotionDashboard.chart) {
+        EmotionDashboard.chart.setOption({
+          xAxis: { data: [...EmotionDashboard.timeLabels] },
+          series: [
+            { data: [...EmotionDashboard.emotionHistory.joy] },
+            { data: [...EmotionDashboard.emotionHistory.activation] },
+            { data: [...EmotionDashboard.emotionHistory.anxiety] },
+          ],
+        });
+      }
+      // 使用该角色最近一次情绪作为当前情绪状态
+      const lastIdx = stored.joy.length - 1;
+      if (lastIdx >= 0) {
+        this.currentEmotion = {
+          joy: stored.joy[lastIdx],
+          activation: stored.activation[lastIdx],
+          anxiety: stored.anxiety[lastIdx],
+        };
+      }
+      EmotionDashboard.updateBars(this.currentEmotion);
+    } else {
+      // 没有历史时，以角色初始情绪为起点
+      EmotionDashboard.updateBars(this.currentEmotion);
+      EmotionDashboard.pushHistory(this.currentEmotion);
+    }
+    // 使用当前角色的动态五维画像更新雷达图
+    const traitStoreMap = this.dynamicTraitsByChar;
+    const dynTraits = (traitStoreMap && traitStoreMap[id])
+      ? traitStoreMap[id]
+      : { ...char.traits };
+    if (!traitStoreMap[id]) {
+      this.dynamicTraitsByChar[id] = dynTraits;
+    }
+    EmotionDashboard.updateRadarChart({
+      ...char,
+      traits: dynTraits,
+    });
 
     PathAnalyzer.reset();
     PathAnalyzer.renderCompareBars(id);
+
+    // 切换人格时，提示窗只保留当前角色的一条，不在主对话框中累积
+    const sysMsgs = document.querySelectorAll('.message.system-msg');
+    sysMsgs.forEach(msg => msg.remove());
 
     ChatEngine.addSystemMessage(
       `🎭 已切换到学生 <b>${char.name}</b>（${char.personality}）<br>

@@ -142,7 +142,7 @@ const CHARACTERS = {
 
   xiaorou: {
     id: 'xiaorou',
-    name: '林小柔',
+    name: '林暖暖',
     avatar: '🥺',
     color: '#9b59b6',
     bgGradient: 'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)',
@@ -186,7 +186,7 @@ const CHARACTERS = {
       {
         trigger: '互动',
         reply: '好的老师，我这就去做。',
-        innerThought: '老师交代的事情一定要做好！不能让老师失望！加油林小柔！',
+        innerThought: '老师交代的事情一定要做好！不能让老师失望！加油林暖暖！',
         emotionDelta: { joy: 5, activation: 8, anxiety: -5 }
       }
     ],

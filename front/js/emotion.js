@@ -212,3 +212,6 @@ const EmotionDashboard = {
     }
   }
 };
+
+// 暴露到全局，便于 workflow.js 通过 window.EmotionDashboard 进行情绪可视化更新
+window.EmotionDashboard = EmotionDashboard;

@@ -39,14 +39,25 @@ const ChatEngine = {
       characterId: currentCharId,
     });
 
+    // 每次老师发话后，实时刷新当前角色的个性化路径分析与教学建议
+    if (window.PathAnalyzer && window.App && App.currentCharacter) {
+      PathAnalyzer.renderCompareBars(App.currentCharacter.id);
+      PathAnalyzer.checkWarnings(App.currentCharacter.id);
+    }
+
     // 仅推送到工作流，不再有任何本地默认回复
     if (window.WorkflowClient && window.App && App.sessionId) {
       if (window.WORKFLOW_CONFIG && window.WORKFLOW_CONFIG.debug && window.console) {
         console.log('[Workflow] 前端已把本条消息发给工作流，sessionId:', App.sessionId, 'content:', text.slice(0, 50));
       }
-      WorkflowClient.sendTextMessage(App.sessionId, 'teacher', text, {
+      // 传输时将 model 直接加入 text 中并用 {} 括起来：{李大志}你好
+      const defaultModel = '李大志';
+      const modelName = (App.currentCharacter && App.currentCharacter.name) || defaultModel;
+      const taggedText = `{${modelName}}` + text;
+      WorkflowClient.sendTextMessage(App.sessionId, 'teacher', taggedText, {
         trigger,
         characterId: App.currentCharacter ? App.currentCharacter.id : null,
+        model: modelName,
       });
     }
   },
@@ -199,6 +210,10 @@ const ChatEngine = {
     msgEl = document.createElement('div');
     msgEl.id = id;
     msgEl.className = 'message workflow-msg fade-in';
+    // 智能体消息也绑定到当前学生，便于在切换人格时按角色过滤显示
+    if (window.App && App.currentCharacter) {
+      msgEl.dataset.characterId = App.currentCharacter.id;
+    }
     msgEl.innerHTML = `
       <div class="msg-avatar workflow-avatar">🤖</div>
       <div class="msg-bubble workflow-bubble">
@@ -246,11 +261,23 @@ const ChatEngine = {
   },
 
   addSystemMessage(text) {
+    if (!this.container) {
+      this.container = document.getElementById('chat-messages');
+      if (!this.container) return;
+    }
+    // 切换提示始终放在主对话框最上方：先移除已有系统提示，再插入到第一个位置
+    const existed = this.container.querySelectorAll('.message.system-msg');
+    existed.forEach(el => el.remove());
+
     const msgEl = document.createElement('div');
     msgEl.className = 'message system-msg fade-in';
     msgEl.innerHTML = `<div class="system-bubble">${text}</div>`;
-    this.container.appendChild(msgEl);
-    this.scrollToBottom();
+
+    if (this.container.firstChild) {
+      this.container.insertBefore(msgEl, this.container.firstChild);
+    } else {
+      this.container.appendChild(msgEl);
+    }
   },
 
   /**
