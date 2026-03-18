@@ -26,6 +26,15 @@ const WORKFLOW_CONFIG = {
   debug: true,
 };
 
+// 训练报告工作流（单独的 bot_app_key）
+const REPORT_WORKFLOW_CONFIG = {
+  endpoint: WORKFLOW_CONFIG.endpoint,
+  botAppKey: 'EpSnUFqHnRYIkpMxrNrdunZqwumDbEjWjoMPkKCUquXMgquZwWWiYiHpRLlxqRbIVhXumaTxRgUpyUzHrtkvQcNCjYBePvZoqJngEzhtvgIWVldHmAkKbiNhnadAmIIS',
+  visitorBizId: WORKFLOW_CONFIG.visitorBizId,
+  workflowStatus: WORKFLOW_CONFIG.workflowStatus,
+  proxyUrl: WORKFLOW_CONFIG.proxyUrl,
+};
+
 function _wfLog() {
   if (WORKFLOW_CONFIG.debug && window.console && console.log) {
     console.log.apply(console, ['[Workflow]'].concat(Array.from(arguments)));
@@ -448,12 +457,7 @@ const WorkflowClient = {
               const type = (payload && payload.type) || eventType;
               const p = payload && payload.payload != null ? payload.payload : payload;
 
-              // 在前端终端完整输出本次工作流返回的数据，便于调试（仅在 debug 模式下）
-              try {
-                if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-                  console.log('[Workflow][RawPayload]', JSON.stringify(payload, null, 2));
-                }
-              } catch (_) {}
+              // 已关闭原始返回 JSON 的完整打印（避免控制台刷屏/影响性能）
 
               if (type === 'error' || eventType === 'error') {
                 const err = payload.error || (p && (p.error || p));
@@ -553,12 +557,7 @@ const WorkflowClient = {
         role: 'teacher',
         ...extra,
       });
-      // 在前端控制台完整输出发送给工作流的 JSON 请求体，便于排查 model / messages 等字段
-      try {
-        console.log('[Workflow][RequestBody]', JSON.stringify(body, null, 2));
-      } catch (_) {
-        console.log('[Workflow][RequestBody]', body);
-      }
+      // 已关闭请求体 JSON 的完整打印（避免泄露/刷屏）
       _wfLog('fetch 开始 POST', url, 'body.session_id:', body.session_id, 'body.content 长度:', body.content.length);
 
       const jsonString = JSON.stringify(body);
@@ -672,11 +671,7 @@ const WorkflowClient = {
         role: 'persona_switch',
         model: modelName,
       });
-      try {
-        console.log('[Workflow][PersonaSwitchBody]', JSON.stringify(body, null, 2));
-      } catch (_) {
-        console.log('[Workflow][PersonaSwitchBody]', body);
-      }
+      // 已关闭人格切换请求体的完整打印
       const jsonString = JSON.stringify(body);
       const utf8Bytes = new TextEncoder().encode(jsonString);
       const res = await fetch(url, {
@@ -713,6 +708,108 @@ const WorkflowClient = {
       });
     }
     return null;
+  },
+
+  async sendTrainingReport(reportPayload) {
+    const url = REPORT_WORKFLOW_CONFIG.proxyUrl || REPORT_WORKFLOW_CONFIG.endpoint;
+    const sessionId = 'report_' + Date.now();
+    const contentStr = JSON.stringify(reportPayload);
+
+    const body = {
+      request_id: 'req_' + sessionId + '_' + Date.now(),
+      content: this.ensureUtf8String(contentStr),
+      session_id: this.normalizeSessionId(sessionId),
+      bot_app_key: REPORT_WORKFLOW_CONFIG.botAppKey,
+      visitor_biz_id: this.ensureUtf8String(REPORT_WORKFLOW_CONFIG.visitorBizId)
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 64) || 'teacher-001',
+      incremental: false,
+      streaming_throttle: 50,
+      visitor_labels: [],
+      custom_variables: this.stringifyCustomVariables({
+        role: 'training_report',
+        report_time: new Date().toISOString(),
+      }),
+      search_network: 'disable',
+      stream: 'enable',
+      workflow_status: REPORT_WORKFLOW_CONFIG.workflowStatus,
+      tcadp_user_id: '',
+    };
+
+    // 已关闭训练报告工作流请求体的完整打印
+
+    try {
+      const jsonString = JSON.stringify(body);
+      const utf8Bytes = new TextEncoder().encode(jsonString);
+      console.log('[ReportWorkflow] 请求体编码: UTF-8, 字节长度:', utf8Bytes.length, 'content 前80字:', body.content.slice(0, 80));
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Accept': 'text/event-stream; charset=utf-8',
+        },
+        body: utf8Bytes,
+      });
+
+      console.log('[ReportWorkflow] fetch 响应 status:', res.status, 'Content-Type:', res.headers.get('Content-Type'));
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn('[ReportWorkflow] HTTP 非 2xx:', res.status, text.slice(0, 300));
+        return null;
+      }
+
+      // 静默读取 SSE，提取首个 reply content 作为结果（不写入主对话框）
+      const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+      if (!reader) return null;
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let finalText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const lines = part.split('\n').filter(Boolean);
+          let eventType = null;
+          const dataLines = [];
+          for (const line of lines) {
+            const t = line.trim();
+            if (t.startsWith('event:')) eventType = t.slice(6).trim();
+            else if (t.startsWith('data:')) dataLines.push(t.slice(5).trim());
+          }
+          for (const dataStr of dataLines) {
+            if (!dataStr) continue;
+            let payload;
+            try {
+              payload = JSON.parse(dataStr);
+            } catch (_) {
+              continue;
+            }
+            const type = (payload && payload.type) || eventType;
+            const p = payload && payload.payload != null ? payload.payload : payload;
+            if (type === 'error' || eventType === 'error') {
+              console.warn('[ReportWorkflow] SSE error:', payload.error || p);
+              continue;
+            }
+            const content = (p && typeof p.content === 'string') ? p.content : (payload && typeof payload.content === 'string' ? payload.content : '');
+            if (content) {
+              finalText = content;
+            }
+          }
+        }
+      }
+
+      console.log('[ReportWorkflow] 返回摘要:', (finalText || '').slice(0, 200));
+      return finalText || null;
+    } catch (e) {
+      console.warn('[ReportWorkflow] sendTrainingReport failed:', e);
+      return null;
+    }
   },
 };
 

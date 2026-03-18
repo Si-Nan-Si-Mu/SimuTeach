@@ -468,6 +468,43 @@ const App = {
       return;
     }
     this.sessionActive = false;
+
+    // 汇总三个人格的训练数据并发送到「训练报告工作流」
+    try {
+      const now = Date.now();
+      const characters = Object.values(window.CHARACTERS || {}).map(c => ({
+        id: c.id,
+        name: c.name,
+        personality: c.personality,
+      }));
+      const history = (window.ChatEngine && Array.isArray(ChatEngine.history)) ? ChatEngine.history : [];
+
+      const triggerStatsByChar = {};
+      history.filter(m => m.role === 'teacher').forEach(m => {
+        const cid = m.characterId || 'unknown';
+        const trig = m.trigger || '自由输入';
+        if (!triggerStatsByChar[cid]) triggerStatsByChar[cid] = {};
+        triggerStatsByChar[cid][trig] = (triggerStatsByChar[cid][trig] || 0) + 1;
+      });
+
+      const payload = {
+        type: 'training_report',
+        created_at: new Date(now).toISOString(),
+        app_session: this.sessionId,
+        characters,
+        chat_history: history,
+        emotion_histories_by_character: this.emotionHistoriesByChar || {},
+        dynamic_traits_by_character: this.dynamicTraitsByChar || {},
+        trigger_stats_by_character: triggerStatsByChar,
+      };
+
+      if (window.WorkflowClient && typeof WorkflowClient.sendTrainingReport === 'function') {
+        WorkflowClient.sendTrainingReport(payload);
+      }
+    } catch (e) {
+      console.warn('[ReportWorkflow] 汇总训练报告数据失败:', e);
+    }
+
     ReportGenerator.generateReport(
       ChatEngine.history,
       this.currentCharacter,
