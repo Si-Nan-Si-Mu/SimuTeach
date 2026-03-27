@@ -1,0 +1,29 @@
+# 配置与密钥（不提交）
+config.json
+config_zhangyiming.json
+config_example_student.json
+config_linnuan.json
+config_lidazhi.json
+frontend/config.js
+scripts/.bot_app_key
+.env
+.env.*
+
+# 数据与模型
+data/
+checkpoints/
+*.pt
+qdrant_db/
+
+# 运行时
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# 系统与 IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
