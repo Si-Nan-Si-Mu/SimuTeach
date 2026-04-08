@@ -26,7 +26,7 @@ window.__REPORT_WORKFLOW_INJECT__ = {
    */
   httpUrl: (function resolveReportHttpUrl() {
     const raw = (import.meta.env.VITE_REPORT_HTTP_URL || '').trim().replace(/\/$/, '')
-    const prodFallback = 'https://agent.orangeblog.us.kg:8000'
+    const prodFallback = 'https://agent.orangeblog.us.kg/v1/chat/completions'
     if (import.meta.env.DEV) {
       if (!raw || /^https?:\/\//i.test(raw)) {
         return '/api/report'

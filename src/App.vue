@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ClassroomSim from './components/ClassroomSim.vue'
 import SideBar from './components/SideBar.vue'
 import SpecialTraining from './components/SpecialTraining.vue'
+import TeachingDocAnalysis from './components/TeachingDocAnalysis.vue'
 import {
   buildAbilityViewFromXe,
   buildEvaluationHtml,
@@ -273,16 +274,7 @@ const onStudentSelectedFull = (student) => {
 
   sessionId.value = `sess_${Date.now()}_${next.id}`
 
-  // 通知工作流切换人格（不清空 UI）；model 与对话里 custom_variables.model 一致用学生姓名
-  try {
-    const client = typeof window !== 'undefined' ? window.WorkflowClient : null
-    const modelLabel = next?.name || next?.personality || ''
-    if (client && typeof client.sendModelSwitch === 'function' && modelLabel) {
-      void client.sendModelSwitch(sessionId.value, modelLabel)
-    }
-  } catch (_) {
-    /* ignore */
-  }
+  // 不再额外发送「人格切换」JSON；后端已在对话请求体内自行处理
 
   // 切换学生：对话 / 右侧折线与路径分析按人格恢复（不 resetEmotions、不强制初始情绪）
   const nid = next?.id
@@ -532,26 +524,67 @@ function renderXeCategoryBars(items) {
 
 async function showReportModal(reportApiResponse = null) {
   const character = selectedStudent.value
-  const history = character?.id ? chatHistoryByChar.value[character.id] || [] : []
   const reportRoot =
     reportApiResponse != null
       ? unwrapReportApiResponse(reportApiResponse) || reportApiResponse
       : null
   const xe = extractXEvaluation(reportRoot)
-  // 有后端 x-evaluation 时以接口数据为准，不依赖本地对话条数
-  if (!character || (!xe && history.length < 2)) return
+  if (typeof window !== 'undefined' && window.console) {
+    console.log('[ReportDirect] 报告渲染输入', {
+      rawResponse: reportApiResponse,
+      unwrappedRoot: reportRoot,
+      hasXEvaluation: !!xe
+    })
+  }
+  // 完全以后端返回为准：只要有角色即可打开，缺失字段直接显示“未返回”
+  if (!character) return
 
   await ensureEchartsLoaded()
 
-  const scores = calculateScores(history, character)
-  const summary = generateSummary(history, character)
-  const suggestions = xe ? buildSuggestionsFromXe(xe) : generateSuggestions(history, character)
+  const suggestions = xe
+    ? buildSuggestionsFromXe(xe)
+    : [
+        {
+          type: 'info',
+          icon: 'ℹ️',
+          text: '后端响应未返回 x-evaluation，报告仅展示可用根字段与调试信息。'
+        }
+      ]
 
-  const overviewHtml = buildTrainingOverviewHtml(xe, summary, escapeHtml, reportRoot)
+  const overviewHtml = xe
+    ? buildTrainingOverviewHtml(xe, null, escapeHtml, reportRoot)
+    : `<div class="summary-grid summary-grid--xe">
+      <div class="summary-item">
+        <div class="summary-num summary-num--text">${escapeHtml(
+          reportRoot && typeof reportRoot.model === 'string' ? reportRoot.model : '—'
+        )}</div>
+        <div class="summary-label">模型（接口返回）</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-num summary-num--text">${escapeHtml(
+          reportRoot && reportRoot.created != null ? String(reportRoot.created) : '—'
+        )}</div>
+        <div class="summary-label">创建时间戳（created）</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-num summary-num--text">${escapeHtml(
+          reportRoot && reportRoot.usage && reportRoot.usage.total_tokens != null
+            ? String(reportRoot.usage.total_tokens)
+            : '—'
+        )}</div>
+        <div class="summary-label">Token 总计</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-num summary-num--text">${escapeHtml(xe ? '已返回' : '未返回')}</div>
+        <div class="summary-label">x-evaluation</div>
+      </div>
+    </div>`
   const evalSectionHtml = xe ? buildEvaluationHtml(xe, escapeHtml, { omitMeta: true }) : ''
   const debugSectionHtml = buildXDebugSection(reportRoot, escapeHtml)
   const abilityView = buildAbilityViewFromXe(xe)
-  const abilityBarsHtml = abilityView ? renderXeCategoryBars(abilityView.items) : renderScoreBars(scores)
+  const abilityBarsHtml = abilityView
+    ? renderXeCategoryBars(abilityView.items)
+    : '<p class="report-ability-source">后端未返回可用的能力分类得分（x-evaluation.categories）。</p>'
 
   const apiModel = reportRoot && typeof reportRoot.model === 'string' ? reportRoot.model : ''
   const reportDisplayName = apiModel || character.name
@@ -594,13 +627,20 @@ async function showReportModal(reportApiResponse = null) {
           ${
             abilityView
               ? '<p class="report-ability-source">以下维度与得分来自后端智能评估（x-evaluation 大类得分）</p>'
-              : ''
+              : '<p class="report-ability-source">当前仅按后端返回展示：缺少 x-evaluation.categories，故不渲染雷达图。</p>'
           }
           <div class="scores-row">
             <div class="report-radar-wrap">
-              <div id="report-radar" style="width:100%;height:260px;"></div>
+              <div class="report-chart-subtitle">雷达图（综合维度）</div>
+              ${
+                abilityView
+                  ? '<div id="report-radar" class="report-radar-canvas"></div>'
+                  : '<div class="report-ability-source" style="padding:12px;">后端缺少雷达数据</div>'
+              }
             </div>
+            <div class="report-chart-divider" aria-hidden="true"></div>
             <div class="score-bars">
+              <div class="report-chart-subtitle">能力条形图（分类得分）</div>
               ${abilityBarsHtml}
             </div>
           </div>
@@ -650,34 +690,21 @@ async function showReportModal(reportApiResponse = null) {
   })
 
   setTimeout(() => {
-    if (!window.echarts) return
+    if (!window.echarts || !abilityView) return
     const dom = document.getElementById('report-radar')
     if (dom) {
     const chart = window.echarts.init(dom)
-    const radarIndicator = abilityView
-      ? abilityView.indicators.map((x) => ({ name: x.name, max: x.max }))
-      : [
-          { name: '共情能力', max: 100 },
-          { name: '提问技巧', max: 100 },
-          { name: '耐心程度', max: 100 },
-          { name: '应变能力', max: 100 },
-          { name: '激励能力', max: 100 }
-        ]
-    const radarValues = abilityView
-      ? abilityView.values
-      : [
-          scores.empathy,
-          scores.questioning,
-          scores.patience,
-          scores.adaptability,
-          scores.encouragement
-        ]
+    const radarIndicator = abilityView.indicators.map((x) => ({ name: x.name, max: x.max }))
+    const radarValues = abilityView.values
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches
     chart.setOption({
       radar: {
         indicator: radarIndicator,
         shape: 'polygon',
+        radius: isMobile ? '76%' : '66%',
+        center: ['50%', isMobile ? '54%' : '52%'],
         splitNumber: 4,
-        axisName: { color: '#636e72', fontSize: 11 },
+        axisName: { color: '#636e72', fontSize: isMobile ? 13 : 11 },
         splitLine: { lineStyle: { color: '#dfe6e9' } },
         splitArea: { areaStyle: { color: ['rgba(255,255,255,0)', 'rgba(200,200,200,0.05)'] } }
       },
@@ -699,20 +726,33 @@ async function showReportModal(reportApiResponse = null) {
         }
       ]
     })
+    requestAnimationFrame(() => chart.resize())
     }
 
     if (xe) {
       const barEl = document.getElementById('report-eval-categories-chart')
       const { names, values } = getCategoryScoresForChart(xe)
       if (barEl && names.length && window.echarts) {
+        const isMobileBar = window.matchMedia && window.matchMedia('(max-width: 768px)').matches
         const bar = window.echarts.init(barEl)
         bar.setOption({
           tooltip: { trigger: 'axis' },
-          grid: { left: 12, right: 12, top: 24, bottom: 8, containLabel: true },
+          grid: {
+            left: isMobileBar ? 8 : 12,
+            right: isMobileBar ? 8 : 12,
+            top: 24,
+            bottom: isMobileBar ? 38 : 16,
+            containLabel: true
+          },
           xAxis: {
             type: 'category',
             data: names,
-            axisLabel: { color: '#636e72', fontSize: 10, interval: 0, rotate: names.length > 3 ? 20 : 0 }
+            axisLabel: {
+              color: '#636e72',
+              fontSize: isMobileBar ? 11 : 10,
+              interval: 0,
+              rotate: names.length > 3 ? (isMobileBar ? 26 : 20) : 0
+            }
           },
           yAxis: { type: 'value', max: 100, axisLabel: { color: '#636e72', fontSize: 10 } },
           series: [
@@ -729,6 +769,7 @@ async function showReportModal(reportApiResponse = null) {
             }
           ]
         })
+        requestAnimationFrame(() => bar.resize())
       }
     }
   }, 200)
@@ -736,6 +777,7 @@ async function showReportModal(reportApiResponse = null) {
 
 function showReportLoading() {
   hideReportLoading()
+  reportLoadingPercent = 8
   const el = document.createElement('div')
   el.id = 'report-loading-overlay'
   el.className = 'report-loading-overlay'
@@ -747,36 +789,146 @@ function showReportLoading() {
     <div class="report-loading-card">
       <div class="report-loading-spinner" aria-hidden="true"></div>
       <p class="report-loading-text">正在生成报告，请稍候…</p>
+      <div class="report-loading-progress" aria-hidden="true">
+        <div class="report-loading-progress-fill" id="report-loading-progress-fill" style="width:${reportLoadingPercent}%;"></div>
+      </div>
+      <p class="report-loading-percent" id="report-loading-percent">${reportLoadingPercent}%</p>
     </div>
   `
   document.body.appendChild(el)
   requestAnimationFrame(() => el.classList.add('report-loading-overlay--show'))
+  reportLoadingTimer = window.setInterval(() => {
+    // 预估进度：请求期间缓慢增长，完成时在 hideReportLoading 置 100%
+    reportLoadingPercent = Math.min(92, reportLoadingPercent + (reportLoadingPercent < 60 ? 5 : 2))
+    const fill = document.getElementById('report-loading-progress-fill')
+    const label = document.getElementById('report-loading-percent')
+    if (fill) fill.style.width = `${reportLoadingPercent}%`
+    if (label) label.textContent = `${reportLoadingPercent}%`
+  }, 220)
 }
 
 function hideReportLoading() {
   const el = document.getElementById('report-loading-overlay')
   if (!el) return
+  if (reportLoadingTimer) {
+    clearInterval(reportLoadingTimer)
+    reportLoadingTimer = null
+  }
+  reportLoadingPercent = 100
+  const fill = document.getElementById('report-loading-progress-fill')
+  const label = document.getElementById('report-loading-percent')
+  if (fill) fill.style.width = '100%'
+  if (label) label.textContent = '100%'
   el.classList.remove('report-loading-overlay--show')
   const remove = () => el.remove()
   el.addEventListener('transitionend', remove, { once: true })
   setTimeout(remove, 280)
 }
 
-async function endSession() {
-  const mergedHist = mergedChatHistorySorted()
-  if (mergedHist.length < 2) {
-    specialRef.value?.appendSystem?.('⚠️ 请至少进行一轮对话后再生成报告。')
-    return
+let reportLoadingTimer = null
+let reportLoadingPercent = 0
+
+function parseOptionalNumber(v) {
+  if (v == null || v === '') return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function parseOptionalBoolean(v) {
+  if (v == null || v === '') return undefined
+  if (typeof v === 'boolean') return v
+  const s = String(v).trim().toLowerCase()
+  if (s === 'true') return true
+  if (s === 'false') return false
+  return undefined
+}
+
+async function requestTrainingReportDirect() {
+  const cfg =
+    typeof window !== 'undefined' && window.__REPORT_WORKFLOW_INJECT__ && typeof window.__REPORT_WORKFLOW_INJECT__ === 'object'
+      ? window.__REPORT_WORKFLOW_INJECT__
+      : null
+  const apiUrl = String(cfg?.httpUrl || '').trim()
+  const apiKey = String(cfg?.httpApiKey || '').trim()
+  if (!apiUrl || !apiKey) {
+    if (typeof window !== 'undefined' && window.console) {
+      console.warn('[ReportDirect] 配置缺失，跳过请求', {
+        hasHttpUrl: !!apiUrl,
+        hasApiKey: !!apiKey
+      })
+    }
+    return null
   }
 
+  const payload = {
+    messages: [{ role: 'user', content: '' }],
+    evaluation: true,
+    api_key: apiKey
+  }
+
+  const t = parseOptionalNumber(cfg?.chatTemperature)
+  const p = parseOptionalNumber(cfg?.chatTopP)
+  const max = parseOptionalNumber(cfg?.chatMaxTokens)
+  const stream = parseOptionalBoolean(cfg?.chatStream)
+  const user = String(cfg?.chatUser || '').trim()
+  if (t != null) payload.temperature = t
+  if (p != null) payload.top_p = p
+  if (max != null) payload.max_tokens = Math.round(max)
+  if (stream != null) payload.stream = stream
+  if (user) payload.user = user
+
+  if (typeof window !== 'undefined' && window.console) {
+    const safePayload = { ...payload }
+    if (safePayload.api_key) safePayload.api_key = '***'
+    console.log('[ReportDirect] 前端发送请求', {
+      url: apiUrl,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: 'Bearer ***' },
+      body: safePayload
+    })
+  }
+
+  const res = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(payload)
+  })
+  const text = await res.text()
+  if (typeof window !== 'undefined' && window.console) {
+    console.log('[ReportDirect] 后端响应', {
+      status: res.status,
+      ok: res.ok,
+      contentType: res.headers.get('Content-Type') || '',
+      rawTextPreview: String(text || '').slice(0, 600)
+    })
+  }
+  if (!res.ok) return null
+  if (!text) return null
+  try {
+    const parsed = JSON.parse(text)
+    if (typeof window !== 'undefined' && window.console) {
+      console.log('[ReportDirect] 后端JSON解析结果', parsed)
+    }
+    return parsed
+  } catch {
+    if (typeof window !== 'undefined' && window.console) {
+      console.warn('[ReportDirect] 响应不是合法JSON，按原始文本处理')
+    }
+    return text
+  }
+}
+
+async function endSession() {
   showReportLoading()
   let reportApiResponse = null
   try {
-    const wf = window.WorkflowClient
-    if (wf && typeof wf.sendTrainingReport === 'function') {
-      reportApiResponse = await wf.sendTrainingReport({
-        student_name: selectedStudent.value?.name || ''
-      })
+    // 报告改为前端直连后端 HTTP，不再经过 WorkflowClient
+    reportApiResponse = await requestTrainingReportDirect()
+    if (typeof window !== 'undefined' && window.console) {
+      console.log('[ReportDirect] 传递给 showReportModal 的数据', reportApiResponse)
     }
     await showReportModal(reportApiResponse)
   } catch (_) {
@@ -915,7 +1067,7 @@ watch([selectedStudent, emotion, sessionId], () => {
     />
 
     <SpecialTraining
-      v-if="currentMode === 'special'"
+      v-show="currentMode === 'special'"
       ref="specialRef"
             :current-emotion="emotion"
             :header-name="chatHeaderName"
@@ -924,9 +1076,11 @@ watch([selectedStudent, emotion, sessionId], () => {
             @send="onSend"
           />
 
-    <main v-else class="chat-main">
-      <ClassroomSim />
+    <main v-show="currentMode === 'classroom'" class="chat-main">
+      <ClassroomSim :active="currentMode === 'classroom'" />
     </main>
+
+    <TeachingDocAnalysis v-show="currentMode === 'doc-analysis'" />
   </div>
 </template>
 
@@ -1002,6 +1156,19 @@ body {
   color: #636e72;
   line-height: 1.45;
 }
+.report-radar-canvas {
+  width: 100%;
+  height: 320px;
+}
+.report-chart-subtitle {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #7f8c8d;
+}
+.report-chart-divider {
+  display: none;
+}
 .report-overview-note,
 .report-suggestions-note {
   margin: 0 0 12px;
@@ -1043,8 +1210,9 @@ body {
   line-height: 1.35;
 }
 .report-x-chart {
-  margin: 12px 0;
-  min-height: 200px;
+  width: min(980px, 100%);
+  height: 320px;
+  margin: 14px auto;
 }
 .report-x-cat {
   border: 1px solid #eef2f5;
@@ -1191,6 +1359,74 @@ body {
   color: #2d3436;
   text-align: center;
   line-height: 1.45;
+}
+.report-loading-progress {
+  width: min(320px, 78vw);
+  height: 8px;
+  background: #edf0f4;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.report-loading-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6c5ce7, #00b894);
+  transition: width 0.18s linear;
+}
+.report-loading-percent {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #636e72;
+}
+
+@media (min-width: 769px) {
+  .scores-row {
+    align-items: stretch;
+    gap: 20px;
+  }
+  .report-radar-wrap {
+    flex: 1.1;
+    min-width: 420px;
+  }
+  .score-bars {
+    flex: 1;
+  }
+  .report-radar-canvas {
+    height: 430px;
+  }
+  .report-x-chart {
+    height: 360px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .scores-row {
+    align-items: stretch;
+    gap: 10px;
+  }
+  .report-radar-wrap {
+    min-height: 0;
+  }
+  .report-radar-canvas {
+    height: 390px;
+  }
+  .score-bars {
+    padding-top: 8px;
+  }
+  .report-chart-divider {
+    display: block;
+    height: 1px;
+    margin: 2px 0 6px;
+    background: linear-gradient(90deg, transparent 0%, #dfe6e9 14%, #dfe6e9 86%, transparent 100%);
+  }
+  .report-x-chart {
+    height: 300px;
+    margin: 10px auto 14px;
+  }
 }
 </style>
 

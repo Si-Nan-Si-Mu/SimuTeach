@@ -1,9 +1,10 @@
 # teacher-training-agent（SimuTeach）
 
-面向师范生训练的前端仿真系统，提供两种训练模式：
+面向师范生训练的前端仿真系统，提供三种训练模式：
 
 - **专项模拟**：一对一数字学生对话训练（对话 + 情绪看板 + 路径分析 + 报告）。
 - **课堂模拟**：三人格课堂场景（讲台/座位/气泡反馈/课堂事件/情绪统计），支持主动轮询调试。
+- **教学文档分析**：上传教学资料（PDF/PPT/语音/图片）并触发统一分析流程（当前完成页面与交互壳）。
 
 项目基于 **Vue 3 + Vite**，工作流与课堂后端通过 HTTP/SSE 对接，图表使用本地 ECharts 资源。
 
@@ -11,7 +12,7 @@
 
 ## 1. 项目亮点
 
-- 双模式统一在一个应用内切换：专项训练 + 课堂训练。
+- 三模式统一在一个应用内切换：专项训练 + 课堂训练 + 教学文档分析。
 - 支持工作流流式回复（SSE）与文本 JSON 回复提炼。
 - 报告弹窗支持 `x-evaluation`、`x-debug` 可视化。
 - 课堂端支持主动会话轮询（`proactive=true`）与前端调试工具。
@@ -95,7 +96,7 @@ teacher-training-agent/
 
 ### 5.2 根组件 `App.vue`
 
-- 管理全局模式：`special` / `classroom`
+- 管理全局模式：`special` / `classroom` / `doc-analysis`
 - 管理当前角色、情绪、会话 id、跨角色对话历史
 - 挂接 `window.ChatEngine`、`window.EmotionDashboard`、`window.App`
 - 负责“结束训练 -> 报告请求 -> 报告弹窗”
@@ -114,6 +115,9 @@ teacher-training-agent/
   - 课堂讲台、三角色座位、对话输入、头顶气泡
   - 情绪均值看板、课堂事件记录
   - 主动轮询调试工具
+- `TeachingDocAnalysis.vue`
+  - 教学资料上传区（拖拽/选择）
+  - 文件列表与发送入口（页面设计态）
 - `EmotionPanel.vue`
   - 实时情绪状态
   - 情绪条 / 路径分析 / 雷达 / 折线
@@ -137,8 +141,8 @@ teacher-training-agent/
 ## 6.2 课堂模拟
 
 - 三人格角色：李大志、张一鸣、林暖暖。
-- 点击角色可定向对话，否则广播全班。
-- **手动对话发送走工作流**：调用 `WorkflowClient.sendClassroomBroadcast`（课堂 Bot）。
+- 点击角色可定向对话，也可通过“广播”按钮面向全班发言。
+- **手动对话直连后端 HTTP**（不经过课堂工作流发送链路）。
 - 学生回复显示在角色头顶气泡。
 - 数据页包含：
   - 三人格情绪均值
@@ -161,12 +165,20 @@ teacher-training-agent/
 - 默认直连 `.env` 中 `VITE_REPORT_HTTP_URL`（并使用 `VITE_REPORT_HTTP_API_KEY`）
 - `content` 为空字符串
 - 请求 JSON 顶层字段 `proactive: true`
+- 轮询会在三个人格中随机切换，并将随机角色写入 `model`
 - 返回展示规则（严格）：
   - 若返回 `choices=ind`（含 `preview.choices=ind`）视为无有效回复，不显示
   - 仅当返回中存在 `x-proactive` 且可提炼出文本时，才序列化到课堂角色气泡
   - 其它返回一律不显示
 
-## 6.4 报告系统（训练结束）
+## 6.4 教学文档分析（新增）
+
+- 与“专项模拟 / 课堂模拟”同级入口。
+- 支持上传：PDF、PPT/PPTX、语音、图片。
+- 支持拖拽上传、文件列表预览、移除文件、发送按钮状态切换。
+- 当前版本聚焦页面与交互设计，后端分析链路可在此基础上接入。
+
+## 6.5 报告系统（训练结束）
 
 报告支持三层数据：
 
@@ -239,7 +251,7 @@ teacher-training-agent/
 
 - 课堂手动对话仍使用 `VITE_CLASSROOM_*`（工作流）
 - 课堂主动轮询调试当前复用 `VITE_REPORT_HTTP_URL` 作为直连后端地址
-- 未配置 `VITE_REPORT_HTTP_URL` 时，生产构建默认直连 **`https://agent.orangeblog.us.kg:8000`**（仅报告与课堂主动 HTTP；专项/课堂工作流 SSE 仍由 `VITE_SPECIAL_*` / `VITE_CLASSROOM_*` 决定）
+- 未配置 `VITE_REPORT_HTTP_URL` 时，生产构建默认直连 **`https://agent.orangeblog.us.kg/v1/chat/completions`**（仅报告与课堂主动 HTTP；专项/课堂工作流 SSE 仍由 `VITE_SPECIAL_*` / `VITE_CLASSROOM_*` 决定）
 
 ---
 

@@ -2,6 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { deepExtractAssistantDialogFromObject, normalizeAssistantDialogText } from '../extractCompletionDialog.js'
 
+const props = defineProps({
+  /** 由 App 控制：仅课堂模式激活轮询 */
+  active: { type: Boolean, default: true }
+})
+
 /** 与左侧专项模拟 SideBar 中三个人格一致（id 便于工作流区分对象） */
 const students = ref([
   {
@@ -42,6 +47,10 @@ const classroomSessionId = ref(`classroom_${Date.now()}_${Math.random().toString
 const workflowBusy = ref(false)
 /** SSE 流式预览（控制台亦有 [ClassroomWorkflow] 日志） */
 const workflowStreamPreview = ref('')
+/** 课堂发送队列：手动发言与主动轮询统一串行，避免互相抢占 */
+const queuedSendCount = ref(0)
+const sendQueue = []
+let queueRunning = false
 /** 主动轮询定时器（每 30s） */
 let proactiveTimer = null
 const proactiveIntervalSec = ref(30)
@@ -49,17 +58,103 @@ const proactiveEnabled = ref(false)
 
 /** 本轮回复气泡应挂在哪些学生头上（单人对话 1 个；全班广播用中间位「代表」展示，避免三重复制） */
 const lastReplyTargets = ref([])
-/** 头顶气泡：与 lastReplyTargets 对应学生显示 */
-const replyBubble = ref({
-  text: '',
-  streaming: false,
-  studentIds: []
-})
+/** 头顶气泡：按角色独立维护，互不覆盖；回复保留至少 7s */
+const BUBBLE_HOLD_MS = 7000
+const bubbleByStudentId = ref({})
+const bubbleHideTimers = new Map()
+
+function getBubbleFor(studentId) {
+  return bubbleByStudentId.value[studentId] || { text: '', streaming: false, visible: false }
+}
+
+function setBubbleFor(ids, patch) {
+  const next = { ...bubbleByStudentId.value }
+  for (const id of ids || []) {
+    if (!id) continue
+    const prev = next[id] || { text: '', streaming: false, visible: false }
+    next[id] = { ...prev, ...patch }
+  }
+  bubbleByStudentId.value = next
+}
+
+function clearBubbleFor(ids) {
+  const next = { ...bubbleByStudentId.value }
+  for (const id of ids || []) {
+    if (!id) continue
+    next[id] = { text: '', streaming: false, visible: false }
+    const t = bubbleHideTimers.get(id)
+    if (t) {
+      clearTimeout(t)
+      bubbleHideTimers.delete(id)
+    }
+  }
+  bubbleByStudentId.value = next
+}
+
+function keepBubbleVisibleFor(ids, ms = BUBBLE_HOLD_MS) {
+  for (const id of ids || []) {
+    if (!id) continue
+    const old = bubbleHideTimers.get(id)
+    if (old) clearTimeout(old)
+    const timer = setTimeout(() => {
+      const cur = getBubbleFor(id)
+      // 若期间进入新一轮流式，则不在此刻清理
+      if (cur.streaming) return
+      clearBubbleFor([id])
+    }, ms)
+    bubbleHideTimers.set(id, timer)
+  }
+}
 
 const bubbleVisibleFor = (studentId) => {
-  const ids = replyBubble.value.studentIds
-  if (!Array.isArray(ids) || !ids.includes(studentId)) return false
-  return !!(replyBubble.value.text || replyBubble.value.streaming)
+  const b = getBubbleFor(studentId)
+  return !!(b.visible && (b.text || b.streaming))
+}
+
+const bubbleTextFor = (studentId) => getBubbleFor(studentId).text || ''
+const bubbleStreamingFor = (studentId) => !!getBubbleFor(studentId).streaming
+
+function finalizeReplyBubbleState() {
+  workflowStreamPreview.value = ''
+  const ids = [...lastReplyTargets.value]
+  if (!ids.length) return
+  const hasTextIds = ids.filter((id) => {
+    const b = getBubbleFor(id)
+    return !!b.text
+  })
+  if (hasTextIds.length) {
+    setBubbleFor(hasTextIds, { streaming: false, visible: true })
+    keepBubbleVisibleFor(hasTextIds, BUBBLE_HOLD_MS)
+  }
+  const emptyIds = ids.filter((id) => !getBubbleFor(id).text)
+  if (emptyIds.length) clearBubbleFor(emptyIds)
+}
+
+async function runSendQueue() {
+  if (queueRunning) return
+  queueRunning = true
+  while (sendQueue.length) {
+    const task = sendQueue.shift()
+    queuedSendCount.value = sendQueue.length
+    workflowBusy.value = true
+    try {
+      await task()
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e)
+      pushClassroomEvent('system', '发送任务异常', msg)
+      clearBubbleFor(lastReplyTargets.value)
+    } finally {
+      workflowBusy.value = false
+      finalizeReplyBubbleState()
+    }
+  }
+  queueRunning = false
+}
+
+function enqueueSendTask(task) {
+  sendQueue.push(task)
+  queuedSendCount.value = sendQueue.length
+  void runSendQueue()
 }
 
 /** 三人格初始情绪（与专项模拟一致，随课堂互动略作波动） */
@@ -104,6 +199,16 @@ const emotionStudentRows = computed(() =>
     anxiety: emotionByStudentId.value[s.id]?.anxiety ?? 0
   }))
 )
+
+/** 课堂对话框：显示最近对话/反馈（含主动轮询），按时间正序 */
+const dialogFeedItems = computed(() => {
+  const items = (classroomEvents.value || [])
+    .filter((ev) => ev && (ev.kind === 'dialog' || ev.kind === 'feedback' || ev.kind === 'system'))
+    .slice(0, 60)
+    .slice()
+    .reverse()
+  return items
+})
 
 function clampEmo(v) {
   return Math.max(0, Math.min(100, Math.round(v)))
@@ -175,9 +280,10 @@ function clampProactiveInterval(v) {
   return Math.max(5, Math.min(300, Math.round(n)))
 }
 
-function buildDirectClassroomBody(content = '', proactive = true, apiKey = '') {
+function buildDirectClassroomBody(content = '', proactive = true, apiKey = '', modelOverride = '') {
+  const overrideModel = String(modelOverride || '').trim()
   return {
-    model: selectedStudent.value?.name || '李大志',
+    model: overrideModel || selectedStudent.value?.name || '李大志',
     messages: [
       {
         role: 'user',
@@ -236,16 +342,16 @@ function hasIndChoiceMarker(obj) {
   return false
 }
 
-function extractProactiveReplyOnly(obj) {
+function extractDirectClassroomReply(obj, { proactive = false } = {}) {
   if (!obj || typeof obj !== 'object') return ''
   if (hasIndChoiceMarker(obj)) return ''
-  const xPro = obj['x-proactive'] ?? obj.x_proactive ?? obj?.payload?.['x-proactive'] ?? obj?.payload?.x_proactive
-  if (xPro == null) return ''
+
   let text = ''
-  if (typeof xPro === 'string') {
-    text = xPro
-  } else if (xPro && typeof xPro === 'object') {
-    text = pickDialogFromAny(xPro) || ''
+  // 主动轮询优先吃 x-proactive；若没有也回退到标准 completion 内容
+  if (proactive) {
+    const xPro = obj['x-proactive'] ?? obj.x_proactive ?? obj?.payload?.['x-proactive'] ?? obj?.payload?.x_proactive
+    if (typeof xPro === 'string') text = xPro
+    else if (xPro && typeof xPro === 'object') text = pickDialogFromAny(xPro) || ''
   }
   if (!text) {
     text = pickDialogFromAny(obj)
@@ -257,7 +363,36 @@ function extractProactiveReplyOnly(obj) {
   return text
 }
 
-async function parseDirectClassroomResponse(res) {
+function pickModelFromAny(obj) {
+  if (!obj || typeof obj !== 'object') return ''
+  const model =
+    obj.model ||
+    obj?.payload?.model ||
+    obj?.preview?.model ||
+    obj?.payload?.preview?.model ||
+    obj?.data?.model
+  return typeof model === 'string' ? model.trim() : ''
+}
+
+function resolveTargetIdsByModel(model, fallbackIds = []) {
+  const m = String(model || '').trim()
+  if (!m) return [...fallbackIds]
+  const hit = students.value.find((s) => s.name === m || m.includes(s.name))
+  return hit ? [hit.id] : [...fallbackIds]
+}
+
+function pickRandomProactiveStudent() {
+  const list = Array.isArray(students.value) ? students.value : []
+  if (!list.length) return { id: 'dazhi', name: '李大志' }
+  const idx = Math.floor(Math.random() * list.length)
+  const chosen = list[idx] || list[0]
+  return {
+    id: chosen?.id || 'dazhi',
+    name: chosen?.name || '李大志'
+  }
+}
+
+async function parseDirectClassroomResponse(res, { proactive = false } = {}) {
   const contentType = String(res.headers.get('Content-Type') || '').toLowerCase()
   if (typeof window !== 'undefined' && window.console) {
     console.log('[ClassroomProactive] 响应状态', {
@@ -271,36 +406,39 @@ async function parseDirectClassroomResponse(res) {
     if (typeof window !== 'undefined' && window.console) {
       console.log('[ClassroomProactive] 非SSE原始响应(前180字):', String(text || '').slice(0, 180))
     }
-    if (!text) return ''
+    if (!text) return { text: '', model: '' }
     try {
       const j = JSON.parse(text)
-      const out = extractProactiveReplyOnly(j)
+      const out = extractDirectClassroomReply(j, { proactive })
+      const model = pickModelFromAny(j)
       if (typeof window !== 'undefined' && window.console) {
         console.log('[ClassroomProactive] 非SSE解析结果', {
           extractedLen: out.length,
           extractedPreview: out.slice(0, 120),
+          model,
           accepted: !!out
         })
       }
-      return out
+      return { text: out, model }
     } catch {
-      // 非 JSON 或不含 x-proactive，一律不展示
-      const out = ''
+      // 非 JSON 响应：尝试尽量净化文本
+      const out = normalizeAssistantDialogText(String(text || '')).trim()
       if (typeof window !== 'undefined' && window.console) {
         console.log('[ClassroomProactive] 非SSE文本净化结果', {
           extractedLen: out.length,
           extractedPreview: out.slice(0, 120)
         })
       }
-      return out
+      return { text: out, model: '' }
     }
   }
 
-  if (!res.body) return ''
+  if (!res.body) return { text: '', model: '' }
   const reader = res.body.getReader()
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
   let finalText = ''
+  let finalModel = ''
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -322,12 +460,15 @@ async function parseDirectClassroomResponse(res) {
           try {
             j = JSON.parse(c)
           } catch {
-            // 主动轮询场景：仅接受可解析 JSON 且含 x-proactive 的响应
+            // 直连场景：仅处理可解析 JSON 分片
             continue
           }
           const payload = j && j.payload != null ? j.payload : j
-          const s = extractProactiveReplyOnly(payload) || extractProactiveReplyOnly(j)
+          const s =
+            extractDirectClassroomReply(payload, { proactive }) || extractDirectClassroomReply(j, { proactive })
           if (s) finalText = s
+          const m = pickModelFromAny(payload) || pickModelFromAny(j)
+          if (m) finalModel = m
         }
       }
     }
@@ -335,13 +476,14 @@ async function parseDirectClassroomResponse(res) {
   if (typeof window !== 'undefined' && window.console) {
     console.log('[ClassroomProactive] SSE解析完成', {
       extractedLen: finalText.length,
-      extractedPreview: finalText.slice(0, 120)
+      extractedPreview: finalText.slice(0, 120),
+      model: finalModel
     })
   }
-  return finalText.trim()
+  return { text: finalText.trim(), model: finalModel }
 }
 
-async function callClassroomBackendDirect({ proactive = true, content = '' } = {}) {
+async function callClassroomBackendDirect({ proactive = true, content = '', modelOverride = '' } = {}) {
   const reportInj =
     typeof window !== 'undefined' && window.__REPORT_WORKFLOW_INJECT__ && typeof window.__REPORT_WORKFLOW_INJECT__ === 'object'
       ? window.__REPORT_WORKFLOW_INJECT__
@@ -351,7 +493,7 @@ async function callClassroomBackendDirect({ proactive = true, content = '' } = {
   if (!url) {
     throw new Error('课堂直连后端地址未配置（请设置 VITE_REPORT_HTTP_URL）')
   }
-  const body = buildDirectClassroomBody(content, proactive, apiKey)
+  const body = buildDirectClassroomBody(content, proactive, apiKey, modelOverride)
   if (typeof window !== 'undefined' && window.console) {
     const safeBody = { ...body }
     if (safeBody.api_key) safeBody.api_key = '***'
@@ -385,11 +527,12 @@ async function callClassroomBackendDirect({ proactive = true, content = '' } = {
     }
     throw new Error(text || `HTTP ${res.status}`)
   }
-  const parsed = await parseDirectClassroomResponse(res)
+  const parsed = await parseDirectClassroomResponse(res, { proactive: !!proactive })
   if (typeof window !== 'undefined' && window.console) {
     console.log('[ClassroomProactive] 返回提炼文本', {
-      len: parsed.length,
-      preview: parsed.slice(0, 120)
+      len: (parsed.text || '').length,
+      preview: (parsed.text || '').slice(0, 120),
+      model: parsed.model || ''
     })
   }
   return parsed
@@ -453,180 +596,135 @@ const onSelectStudent = (s) => {
   selectedStudentId.value = s.id
 }
 
-const onBroadcast = async () => {
+const onBroadcast = async ({ forceClass = false } = {}) => {
   const t = broadcastText.value.trim()
   if (!t) return
-  const prefix = selectedStudent.value ? `教师对 ${selectedStudent.value.name}：` : '教师广播：'
+  const selectedSnapshot = forceClass
+    ? null
+    : selectedStudent.value
+    ? { id: selectedStudent.value.id, name: selectedStudent.value.name }
+    : null
+  const prefix = selectedSnapshot ? `教师对 ${selectedSnapshot.name}：` : '教师广播：'
   const teacherLine = `${prefix}${t}`
   pushClassroomEvent('dialog', '教师发言', teacherLine)
-  if (selectedStudent.value) {
-    nudgeEmotionForStudents([selectedStudent.value.id], { joy: 2, activation: 3, anxiety: -2 })
+  if (selectedSnapshot) {
+    nudgeEmotionForStudents([selectedSnapshot.id], { joy: 2, activation: 3, anxiety: -2 })
   } else {
     nudgeEmotionForAll({ joy: 1, activation: 2, anxiety: -1 })
   }
   broadcastText.value = ''
 
-  const wf = typeof window !== 'undefined' ? window.WorkflowClient : null
-  const cfg = typeof window !== 'undefined' ? window.CLASSROOM_WORKFLOW_CONFIG : null
-  const hasKey = !!(cfg && cfg.botAppKey)
-  if (!wf || typeof wf.sendClassroomBroadcast !== 'function' || !hasKey) {
-    if (typeof window !== 'undefined' && window.console) {
-      console.info(
-        '[ClassroomWorkflow] 已跳过工作流：',
-        !hasKey ? '未配置 VITE_CLASSROOM_BOT_APP_KEY（.env.local）' : 'WorkflowClient 不可用'
-      )
-    }
-    return
-  }
-
-  workflowBusy.value = true
-  workflowStreamPreview.value = ''
-  lastReplyTargets.value = selectedStudent.value
-    ? [selectedStudent.value.id]
-    : ['yiming']
-  replyBubble.value = {
-    text: '',
-    streaming: true,
-    studentIds: [...lastReplyTargets.value]
-  }
-  try {
-    const payloadText = `{课堂}${teacherLine}`
-    const text = await wf.sendClassroomBroadcast(classroomSessionId.value, payloadText, {
-      broadcastScope: selectedStudent.value ? 'student' : 'class',
-      targetStudentId: selectedStudent.value?.id || '',
-      targetStudentName: selectedStudent.value?.name || '',
-      proactive: false
-    })
-    if (text) {
-      replyBubble.value = { text, streaming: false, studentIds: [...lastReplyTargets.value] }
-      const names = lastReplyTargets.value
-        .map((id) => students.value.find((s) => s.id === id)?.name)
-        .filter(Boolean)
-        .join('、')
-      pushClassroomEvent('feedback', names ? `学生反馈（${names}）` : '学生反馈（课堂）', text)
-      nudgeEmotionForStudents(lastReplyTargets.value, { joy: 4, activation: 3, anxiety: -4 })
-    } else {
-      replyBubble.value = { text: '', streaming: false, studentIds: [] }
-    }
-  } catch (e) {
-    const msg = e && e.message ? e.message : String(e)
-    pushClassroomEvent('system', '课堂请求失败', msg)
-    replyBubble.value = { text: '', streaming: false, studentIds: [] }
-  } finally {
-    workflowBusy.value = false
+  enqueueSendTask(async () => {
     workflowStreamPreview.value = ''
-    const b = replyBubble.value
-    if (b.streaming) {
-      if (!b.text) {
-        replyBubble.value = { text: '', streaming: false, studentIds: [] }
+    lastReplyTargets.value = selectedSnapshot ? [selectedSnapshot.id] : ['yiming']
+    setBubbleFor(lastReplyTargets.value, { text: '', streaming: true, visible: true })
+    try {
+      // 课堂手动发言改为直连后端 API，不再经过工作流
+      const direct = await callClassroomBackendDirect({ proactive: false, content: teacherLine })
+      const text = direct && typeof direct === 'object' ? direct.text || '' : String(direct || '')
+      const initialIds = [...lastReplyTargets.value]
+      const targetIds = resolveTargetIdsByModel(direct?.model, initialIds)
+      const staleIds = initialIds.filter((id) => !targetIds.includes(id))
+      if (staleIds.length) clearBubbleFor(staleIds)
+      lastReplyTargets.value = [...targetIds]
+      if (text) {
+        setBubbleFor(targetIds, { text, streaming: false, visible: true })
+        keepBubbleVisibleFor(targetIds, BUBBLE_HOLD_MS)
+        const names = lastReplyTargets.value
+          .map((id) => students.value.find((s) => s.id === id)?.name)
+          .filter(Boolean)
+          .join('、')
+        pushClassroomEvent('feedback', names ? `学生反馈（${names}）` : '学生反馈（课堂）', text)
+        nudgeEmotionForStudents(targetIds, { joy: 4, activation: 3, anxiety: -4 })
       } else {
-        replyBubble.value = { ...b, streaming: false }
+        clearBubbleFor(targetIds)
       }
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e)
+      pushClassroomEvent('system', '课堂请求失败', msg)
+      clearBubbleFor(lastReplyTargets.value)
     }
-  }
+  })
 }
 
 /** 主动轮询：每 30s 直连课堂后端发空内容，并携带 proactive=true */
-const sendProactiveTick = async ({ fromManual = false } = {}) => {
-  if (workflowBusy.value) return
-  workflowBusy.value = true
-  workflowStreamPreview.value = ''
-  // 课堂主动轮询默认按全班代表展示在中间位
-  lastReplyTargets.value = ['yiming']
-  replyBubble.value = {
-    text: '',
-    streaming: true,
-    studentIds: [...lastReplyTargets.value]
-  }
-  pushClassroomEvent(
-    'system',
-    fromManual ? '主动会话调试' : '主动轮询',
-    '已直连后端发送 proactive=true 空内容请求。'
-  )
-
-  try {
-    const text = await callClassroomBackendDirect({ proactive: true, content: '' })
-    if (text) {
-      replyBubble.value = { text, streaming: false, studentIds: [...lastReplyTargets.value] }
-      const names = lastReplyTargets.value
-        .map((id) => students.value.find((s) => s.id === id)?.name)
-        .filter(Boolean)
-        .join('、')
-      pushClassroomEvent('feedback', names ? `学生反馈（${names}）` : '学生反馈（课堂）', text)
-      nudgeEmotionForStudents(lastReplyTargets.value, { joy: 4, activation: 3, anxiety: -4 })
-    } else {
-      replyBubble.value = { text: '', streaming: false, studentIds: [] }
-    }
-  } catch (e) {
-    const msg = e && e.message ? e.message : String(e)
-    pushClassroomEvent('system', '主动会话失败', msg)
-    replyBubble.value = { text: '', streaming: false, studentIds: [] }
-  } finally {
-    workflowBusy.value = false
+const sendProactiveTick = ({ fromManual = false } = {}) => {
+  enqueueSendTask(async () => {
     workflowStreamPreview.value = ''
-    const b = replyBubble.value
-    if (b.streaming) {
-      if (!b.text) {
-        replyBubble.value = { text: '', streaming: false, studentIds: [] }
+    const randomStudent = pickRandomProactiveStudent()
+    // 主动轮询：每次随机切换人格，并把 model 指向该人格
+    lastReplyTargets.value = [randomStudent.id]
+    setBubbleFor(lastReplyTargets.value, { text: '', streaming: true, visible: true })
+    pushClassroomEvent(
+      'system',
+      fromManual ? '主动会话调试' : '主动轮询',
+      `已直连后端发送 proactive=true 空内容请求（model=${randomStudent.name}）。`
+    )
+
+    try {
+      const direct = await callClassroomBackendDirect({
+        proactive: true,
+        content: '',
+        modelOverride: randomStudent.name
+      })
+      const text = direct && typeof direct === 'object' ? direct.text || '' : String(direct || '')
+      const initialIds = [...lastReplyTargets.value]
+      const targetIds = resolveTargetIdsByModel(direct?.model, initialIds)
+      const staleIds = initialIds.filter((id) => !targetIds.includes(id))
+      if (staleIds.length) clearBubbleFor(staleIds)
+      lastReplyTargets.value = [...targetIds]
+      if (text) {
+        setBubbleFor(targetIds, { text, streaming: false, visible: true })
+        keepBubbleVisibleFor(targetIds, BUBBLE_HOLD_MS)
+        const names = lastReplyTargets.value
+          .map((id) => students.value.find((s) => s.id === id)?.name)
+          .filter(Boolean)
+          .join('、')
+        pushClassroomEvent('feedback', names ? `学生反馈（${names}）` : '学生反馈（课堂）', text)
+        nudgeEmotionForStudents(targetIds, { joy: 4, activation: 3, anxiety: -4 })
       } else {
-        replyBubble.value = { ...b, streaming: false }
+        clearBubbleFor(targetIds)
       }
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e)
+      pushClassroomEvent('system', '主动会话失败', msg)
+      clearBubbleFor(lastReplyTargets.value)
     }
-  }
+  })
 }
 
-onMounted(() => {
-  if (typeof window === 'undefined') return
-  window.ClassroomWorkflowHooks = {
-    onDelta(accumulatedText) {
-      const t = normalizeAssistantDialogText(accumulatedText || '')
-      workflowStreamPreview.value = t
-      replyBubble.value = {
-        text: t,
-        streaming: true,
-        studentIds: [...(lastReplyTargets.value.length ? lastReplyTargets.value : replyBubble.value.studentIds)]
-      }
-      if (window.console && accumulatedText) {
-        console.debug('[ClassroomWorkflow] 流式累计', (accumulatedText || '').length, '字')
-      }
-    },
-    onFinalize(finalText, meta) {
-      workflowStreamPreview.value = ''
-      const text = normalizeAssistantDialogText((finalText || '').trim())
-      const ids = lastReplyTargets.value.length ? [...lastReplyTargets.value] : [...replyBubble.value.studentIds]
-      if (!text) {
-        replyBubble.value = { text: '', streaming: false, studentIds: [] }
-        return
-      }
-      replyBubble.value = { text, streaming: false, studentIds: ids }
-      const names = ids
-        .map((id) => students.value.find((s) => s.id === id)?.name)
-        .filter(Boolean)
-        .join('、')
-      pushClassroomEvent('feedback', names ? `学生反馈（${names}）` : '学生反馈（课堂）', text)
-      nudgeEmotionForStudents(ids, { joy: 4, activation: 3, anxiety: -4 })
-      console.info('[ClassroomWorkflow] 本轮回复完成，长度', text.length)
-    },
-    onSystem(msg) {
-      const m = String(msg || '')
-      pushClassroomEvent('system', '系统提示', m)
-      console.warn('[ClassroomWorkflow]', m)
-    },
-  }
+const onBroadcastClass = () => onBroadcast({ forceClass: true })
 
-  proactiveEnabled.value = true
+onMounted(() => {
+  proactiveEnabled.value = !!props.active
   proactiveIntervalSec.value = clampProactiveInterval(proactiveIntervalSec.value)
   restartProactiveTimer()
 })
+
+watch(
+  () => props.active,
+  (isActive) => {
+    if (isActive) {
+      proactiveEnabled.value = true
+      proactiveIntervalSec.value = clampProactiveInterval(proactiveIntervalSec.value)
+      restartProactiveTimer()
+      return
+    }
+    if (proactiveTimer) {
+      clearInterval(proactiveTimer)
+      proactiveTimer = null
+    }
+    workflowStreamPreview.value = ''
+  }
+)
 
 onBeforeUnmount(() => {
   if (proactiveTimer) {
     clearInterval(proactiveTimer)
     proactiveTimer = null
   }
-  if (typeof window !== 'undefined' && window.ClassroomWorkflowHooks) {
-    window.ClassroomWorkflowHooks = null
-  }
+  for (const t of bubbleHideTimers.values()) clearTimeout(t)
+  bubbleHideTimers.clear()
 })
 </script>
 
@@ -665,13 +763,13 @@ onBeforeUnmount(() => {
               <div
                 v-if="bubbleVisibleFor(s.id)"
                 class="speech-bubble speech-bubble--reply"
-                :class="{ 'speech-bubble--streaming': replyBubble.streaming }"
+                :class="{ 'speech-bubble--streaming': bubbleStreamingFor(s.id) }"
                 role="status"
-                :aria-label="replyBubble.streaming ? '智能体正在生成回复' : '智能体回复'"
+                :aria-label="bubbleStreamingFor(s.id) ? '智能体正在生成回复' : '智能体回复'"
               >
                 <div class="speech-bubble-inner speech-bubble-inner--reply">
-                  <span class="speech-bubble-text">{{ replyBubble.text || (replyBubble.streaming ? '…' : '') }}</span>
-                  <span v-if="replyBubble.streaming" class="speech-bubble-cursor" aria-hidden="true" />
+                  <span class="speech-bubble-text">{{ bubbleTextFor(s.id) || (bubbleStreamingFor(s.id) ? '…' : '') }}</span>
+                  <span v-if="bubbleStreamingFor(s.id)" class="speech-bubble-cursor" aria-hidden="true" />
                 </div>
                 <div class="speech-tail" />
               </div>
@@ -691,6 +789,23 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <!-- 对话框：同步展示手动与主动轮询的学生发言 -->
+      <div class="classroom-dialog-feed" role="log" aria-label="课堂对话框">
+        <div v-if="!dialogFeedItems.length" class="dialog-feed-empty">暂无对话记录</div>
+        <div v-else class="dialog-feed-list">
+          <div
+            v-for="ev in dialogFeedItems"
+            :key="ev.id"
+            class="dialog-feed-item"
+            :data-kind="ev.kind"
+          >
+            <span class="dialog-feed-time">{{ formatEvtTime(ev.ts) }}</span>
+            <span class="dialog-feed-title">{{ ev.title }}</span>
+            <span v-if="ev.detail" class="dialog-feed-detail">{{ ev.detail }}</span>
+          </div>
+        </div>
+      </div>
+
       <footer class="teacher-bar" aria-label="教师控制栏">
         <div v-if="workflowStreamPreview" class="workflow-stream-preview" aria-live="polite">
           <span class="workflow-stream-label">智能体生成中…</span>
@@ -704,18 +819,29 @@ onBeforeUnmount(() => {
             type="text"
             name="classroom-broadcast"
             autocomplete="off"
-            :disabled="workflowBusy"
             :aria-label="selectedStudent ? `对 ${selectedStudent.name} 说话` : '面向全班广播'"
             :placeholder="selectedStudent ? `对 ${selectedStudent.name} 说...` : '输入要面向全班广播的内容…'"
-            @keydown.enter.prevent="onBroadcast"
+            @keydown.enter.prevent="onBroadcast()"
           />
           <button
             class="broadcast-btn"
             type="button"
-            :disabled="workflowBusy"
-            @click="onBroadcast"
+            @click="onBroadcast()"
           >
-            {{ workflowBusy ? '工作流处理中…' : '发送（含工作流）' }}
+            {{
+              workflowBusy
+                ? `发送排队中（${queuedSendCount}）`
+                : queuedSendCount > 0
+                  ? `发送（队列 ${queuedSendCount}）`
+                  : '发送'
+            }}
+          </button>
+          <button
+            class="broadcast-btn broadcast-btn--class"
+            type="button"
+            @click="onBroadcastClass"
+          >
+            广播
           </button>
         </div>
       </footer>
@@ -931,6 +1057,64 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 
+.classroom-dialog-feed {
+  flex: 0 0 auto;
+  margin: 0 6px 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(45, 52, 54, 0.12);
+  box-shadow: 0 10px 18px rgba(45, 52, 54, 0.06);
+  max-height: clamp(96px, 18vh, 190px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dialog-feed-empty {
+  font-size: 12px;
+  color: rgba(45, 52, 54, 0.55);
+}
+
+.dialog-feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dialog-feed-item {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 4px 10px;
+  align-items: start;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.dialog-feed-time {
+  color: rgba(45, 52, 54, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog-feed-title {
+  font-weight: 800;
+  color: rgba(26, 29, 35, 0.92);
+}
+
+.dialog-feed-detail {
+  grid-column: 2 / -1;
+  color: rgba(26, 29, 35, 0.82);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dialog-feed-item[data-kind='feedback'] .dialog-feed-title {
+  color: rgba(52, 152, 219, 0.96);
+}
+
+.dialog-feed-item[data-kind='system'] .dialog-feed-title {
+  color: rgba(142, 153, 164, 0.96);
+}
+
 .seating-grid {
   width: 100%;
   max-width: min(960px, 98vw);
@@ -1134,9 +1318,9 @@ onBeforeUnmount(() => {
 .speech-bubble {
   position: absolute;
   left: 50%;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 6px);
   transform: translateX(-50%);
-  width: min(180px, calc(100% + 48px));
+  width: min(240px, calc(100% + 88px));
   pointer-events: none;
   z-index: 5;
 }
@@ -1164,8 +1348,8 @@ onBeforeUnmount(() => {
 
 /* 智能体回复：角色头顶气泡 */
 .speech-bubble--reply {
-  width: min(280px, calc(100vw - 40px));
-  max-width: min(280px, calc(100% + 100px));
+  width: min(340px, calc(100vw - 32px));
+  max-width: min(340px, calc(100% + 140px));
   z-index: 8;
   animation: speech-bubble-pop 0.32s cubic-bezier(0.34, 1.45, 0.64, 1);
 }
@@ -1183,14 +1367,14 @@ onBeforeUnmount(() => {
 
 .speech-bubble-inner--reply {
   text-align: left;
-  max-height: 150px;
+  max-height: 112px;
   overflow-x: hidden;
   overflow-y: auto;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.35;
   color: rgba(45, 52, 54, 0.92);
-  padding: 12px 14px;
-  border-radius: 18px;
+  padding: 8px 12px;
+  border-radius: 14px;
   background: linear-gradient(165deg, #ffffff 0%, #f4f7fb 100%);
   border: 1px solid rgba(45, 52, 54, 0.1);
   box-shadow:
@@ -1321,6 +1505,10 @@ onBeforeUnmount(() => {
 
 .broadcast-btn:hover {
   filter: brightness(1.04);
+}
+
+.broadcast-btn--class {
+  background: linear-gradient(180deg, #1565c0, #0d47a1);
 }
 
 .panel {
@@ -1764,14 +1952,15 @@ onBeforeUnmount(() => {
   }
 
   .speech-bubble--reply {
-    width: min(220px, 84vw);
-    max-width: 84vw;
+    width: min(270px, 90vw);
+    max-width: 90vw;
   }
 
   .speech-bubble-inner--reply {
-    max-height: 120px;
-    font-size: 12px;
-    padding: 10px 12px;
+    max-height: 100px;
+    font-size: 11px;
+    line-height: 1.3;
+    padding: 8px 10px;
   }
 
   .teacher-bar {

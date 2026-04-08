@@ -396,7 +396,7 @@ export function buildEvaluationHtml(xe, escapeHtmlFn, options = {}) {
       <h3>📈 智能评估（x-evaluation）</h3>
       ${meta}
       ${ou}
-      <div id="report-eval-categories-chart" class="report-x-chart" style="width:100%;height:240px;"></div>
+      <div id="report-eval-categories-chart" class="report-x-chart"></div>
       <div class="report-x-cats">${catsHtml}</div>
     </div>`
 }

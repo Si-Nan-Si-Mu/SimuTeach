@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
-  mode: { type: String, default: 'special' }, // 'special' | 'classroom'
+  mode: { type: String, default: 'special' }, // 'special' | 'classroom' | 'doc-analysis'
   /** 移动端：抽屉是否打开（由 App 控制） */
   mobileOpen: { type: Boolean, default: false }
 })
@@ -313,6 +313,19 @@ onBeforeUnmount(() => {
         "
       >
         <span>🏫</span><span v-if="!collapsed">课堂模拟</span>
+      </button>
+      <button
+        class="sidebar-btn"
+        id="btn-doc-analysis"
+        type="button"
+        @click="
+          () => {
+            emit('switch-mode', 'doc-analysis')
+            emit('close-mobile')
+          }
+        "
+      >
+        <span>🗂️</span><span v-if="!collapsed">教学文档分析</span>
       </button>
     </div>
 
