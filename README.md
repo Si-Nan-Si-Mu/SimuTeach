@@ -57,8 +57,7 @@ teacher-training-agent/
 ├─ index.html
 ├─ package.json
 ├─ vite.config.js
-├─ .env.example
-├─ .env.local
+├─ .env.example          # 复制为 .env.local 使用；.env.local 不纳入版本库
 ├─ README.md
 ├─ public/
 │  └─ favicon.svg
@@ -81,7 +80,8 @@ teacher-training-agent/
       ├─ SpecialTraining.vue
       ├─ ChatBox.vue
       ├─ EmotionPanel.vue
-      └─ ClassroomSim.vue
+      ├─ ClassroomSim.vue
+      └─ TeachingDocAnalysis.vue
 ```
 
 ---

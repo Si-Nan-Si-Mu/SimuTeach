@@ -14,6 +14,7 @@ dist-ssr
 
 # 密钥与本地环境（含课堂/专项 Bot Key）
 .env
+.env.local
 .env.*.local
 
 # Editor directories and files
