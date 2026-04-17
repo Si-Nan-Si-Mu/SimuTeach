@@ -1,47 +1,69 @@
-# teacher-training-agent（SimuTeach）
+# teacher-training-agent (SimuTeach)
 
-面向师范生训练的前端仿真系统，提供三种训练模式：
+面向师范生训练的前端仿真系统，统一提供三种训练模式：
 
-- **专项模拟**：一对一数字学生对话训练（对话 + 情绪看板 + 路径分析 + 报告）。
-- **课堂模拟**：三人格课堂场景（讲台/座位/气泡反馈/课堂事件/情绪统计），支持主动轮询调试。
-- **教学文档分析**：上传教学资料（PDF/PPT/语音/图片）并触发统一分析流程（当前完成页面与交互壳）。
+- `专项模拟`：一对一数字学生对话（对话 + 情绪看板 + 路径分析 + 报告）
+- `课堂模拟`：三人格课堂场景（讲台/座位/气泡反馈/课堂事件/情绪统计）
+- `教学文档分析`：教学资料上传分析（多文件、报告切换、结果弹窗、调试面板）
 
-项目基于 **Vue 3 + Vite**，工作流与课堂后端通过 HTTP/SSE 对接，图表使用本地 ECharts 资源。
-
----
-
-## 1. 项目亮点
-
-- 三模式统一在一个应用内切换：专项训练 + 课堂训练 + 教学文档分析。
-- 支持工作流流式回复（SSE）与文本 JSON 回复提炼。
-- 报告弹窗支持 `x-evaluation`、`x-debug` 可视化。
-- 课堂端支持主动会话轮询（`proactive=true`）与前端调试工具。
-- 移动端优化：专项和课堂都支持双页切换（对话页 / 数据页）。
+项目基于 `Vue 3 + Vite`，通过 `HTTP/SSE` 对接工作流与后端服务，图表使用本地 `ECharts` 资源。
 
 ---
 
-## 2. 技术栈
+## 功能概览
 
-- **框架**：Vue `^3.5.30`（SFC + `<script setup>`）
-- **构建工具**：Vite `^8.0.0`
-- **图表**：ECharts（本地文件 `vendor/front/js/echarts.min.js`）
-- **样式体系**：
-  - `vendor/front/css/style.css`（主视觉与公共组件）
-  - 组件内 scoped/局部覆盖样式（移动端与特定模块）
-- **通信协议**：
-  - HTTP JSON
-  - HTTP SSE（`text/event-stream`）
+### 专项模拟
+
+- 教师消息优先走工作流，失败时本地策略兜底
+- 快捷语驱动路径分析统计（鼓励/安抚/互动/提问/批评）
+- 情绪看板按角色隔离并可恢复上下文
+
+### 课堂模拟
+
+- 三人格角色互动：定向对话 + 广播
+- 课堂数据页：情绪均值、学生明细、课堂事件
+- 主动轮询调试：`proactive=true` 直连后端验证主动回复链路
+
+### 教学文档分析
+
+- 拖拽/选择上传，支持多文件累计选择与去重
+- 分析结果弹窗展示：思维导图、教学诊断、执行画像（默认折叠）
+- 外部报告切换面板：可按文件查看历史分析结果
+- 调试页面可开关，支持原始响应与分析报告下载
 
 ---
 
-## 3. 快速开始
+## 技术栈
+
+- 框架：`Vue 3`（`<script setup>`）
+- 构建：`Vite`
+- 图表：`vendor/front/js/echarts.min.js`
+- 样式：
+  - `vendor/front/css/style.css`（主视觉/公共样式）
+  - 组件内 `scoped` 样式（页面级覆盖与响应式）
+- 协议：`HTTP JSON`、`HTTP SSE (text/event-stream)`
+
+---
+
+## 快速开始
+
+### 1) 安装依赖
 
 ```bash
 npm install
+```
+
+### 2) 配置环境变量
+
+将 `.env.example` 复制为 `.env.local` 并填写必要配置（至少包含专项/课堂/报告相关 key 与 endpoint）。
+
+### 3) 启动开发环境
+
+```bash
 npm run dev
 ```
 
-生产构建：
+### 4) 构建与预览
 
 ```bash
 npm run build
@@ -50,233 +72,113 @@ npm run preview
 
 ---
 
-## 4. 目录结构（最新）
+## 教学文档上传规则
+
+当前上传校验规则如下（前端已实现类型与大小检查）：
+
+- 文档：`.pdf` `.doc` `.docx` `.ppt` `.pptx`（单文件最大 `200MB`）
+- 文档：`.xlsx` `.xls` `.md` `.txt` `.csv`（单文件最大 `20MB`）
+- 抓包：`.pcap`（单文件最大 `20MB`）
+- 图片：`.jpg` `.jpeg` `.png`（单文件最大 `50MB`）
+- 文件数量：单次会话最多 `10` 个
+
+---
+
+## 目录结构
 
 ```text
 teacher-training-agent/
-├─ index.html
-├─ package.json
-├─ vite.config.js
-├─ .env.example          # 复制为 .env.local 使用；.env.local 不纳入版本库
-├─ README.md
 ├─ public/
-│  └─ favicon.svg
 ├─ vendor/
 │  └─ front/
-│     ├─ css/
-│     │  └─ style.css
+│     ├─ css/style.css
 │     └─ js/
 │        ├─ echarts.min.js
 │        └─ workflow.js
-└─ src/
-   ├─ main.js
-   ├─ style.css
-   ├─ App.vue
-   ├─ classroom-workflow-inject.js
-   ├─ reportEvaluation.js
-   ├─ extractCompletionDialog.js
-   └─ components/
-      ├─ SideBar.vue
-      ├─ SpecialTraining.vue
-      ├─ ChatBox.vue
-      ├─ EmotionPanel.vue
-      ├─ ClassroomSim.vue
-      └─ TeachingDocAnalysis.vue
+├─ src/
+│  ├─ App.vue
+│  ├─ main.js
+│  ├─ classroom-workflow-inject.js
+│  ├─ reportEvaluation.js
+│  ├─ extractCompletionDialog.js
+│  └─ components/
+│     ├─ SideBar.vue
+│     ├─ SpecialTraining.vue
+│     ├─ ClassroomSim.vue
+│     ├─ EmotionPanel.vue
+│     ├─ ChatBox.vue
+│     └─ TeachingDocAnalysis.vue
+├─ .env.example
+├─ vite.config.js
+└─ README.md
 ```
 
 ---
 
-## 5. 前端架构与数据流
+## 核心架构说明
 
-### 5.1 启动入口
+### 启动链路
 
-1. `src/main.js` 先注入 `classroom-workflow-inject.js`
-2. 再加载 `vendor/front/js/workflow.js`
+1. `src/main.js` 注入 `classroom-workflow-inject.js`
+2. 加载 `vendor/front/js/workflow.js`
 3. 挂载 `App.vue`
 
-### 5.2 根组件 `App.vue`
+### 根组件职责（`App.vue`）
 
-- 管理全局模式：`special` / `classroom` / `doc-analysis`
-- 管理当前角色、情绪、会话 id、跨角色对话历史
-- 挂接 `window.ChatEngine`、`window.EmotionDashboard`、`window.App`
-- 负责“结束训练 -> 报告请求 -> 报告弹窗”
+- 管理模式切换：`special` / `classroom` / `doc-analysis`
+- 管理角色、情绪、会话与跨组件状态
+- 负责训练结束后的报告请求与展示
 
-### 5.3 核心组件分工
+### 关键组件
 
-- `SideBar.vue`
-  - 模式切换
-  - 角色选择
-  - 自定义人格（五维可编辑）
-  - 工作流数据弹窗入口、报告入口
-- `SpecialTraining.vue`
-  - 移动端双页：对话 / 看板
-  - 封装 `ChatBox + EmotionPanel`
-- `ClassroomSim.vue`
-  - 课堂讲台、三角色座位、对话输入、头顶气泡
-  - 情绪均值看板、课堂事件记录
-  - 主动轮询调试工具
-- `TeachingDocAnalysis.vue`
-  - 教学资料上传区（拖拽/选择）
-  - 文件列表与发送入口（页面设计态）
-- `EmotionPanel.vue`
-  - 实时情绪状态
-  - 情绪条 / 路径分析 / 雷达 / 折线
-- `reportEvaluation.js`
-  - 报告 JSON 解析与可视化 HTML 拼装
-  - OU 参数中文映射、能力评估构建、建议生成
-- `extractCompletionDialog.js`
-  - 从文本 JSON / 片段中提炼 `choices[0].message.content`
+- `SpecialTraining.vue`：专项训练页容器
+- `ClassroomSim.vue`：课堂训练 + 主动轮询调试
+- `TeachingDocAnalysis.vue`：文档上传、分析结果、调试页面
+- `EmotionPanel.vue`：情绪看板可视化
 
 ---
 
-## 6. 前端功能文档（完整）
+## 环境变量建议
 
-## 6.1 专项模拟
+以 `.env.example` 为准，常见分组：
 
-- 教师发送后优先走工作流。
-- 工作流失败或空返回时走本地回退策略（情绪增量 + 学生回复模板）。
-- 快捷语会触发路径分析统计（鼓励/安抚/互动/提问/批评）。
-- 右侧看板按当前角色独立缓存和恢复。
-
-## 6.2 课堂模拟
-
-- 三人格角色：李大志、张一鸣、林暖暖。
-- 点击角色可定向对话，也可通过“广播”按钮面向全班发言。
-- **手动对话直连后端 HTTP**（不经过课堂工作流发送链路）。
-- 学生回复显示在角色头顶气泡。
-- 数据页包含：
-  - 三人格情绪均值
-  - 各学生情绪明细
-  - 课堂事件记录（对话 / 学生反馈 / 系统）
-- 移动端双页切换：`💬 对话` / `📊 数据`。
-
-## 6.3 课堂主动会话（新增）
-
-课堂模拟提供“主动对话调试”区：
-
-- 轮询秒数输入（5~300）
-- 应用轮询设置
-- 开启/停止轮询
-- 手动测试主动会话
-
-主动请求特点：
-
-- **直连课堂后端**（不经过 `WorkflowClient.sendClassroomBroadcast` 发送链路）
-- 默认直连 `.env` 中 `VITE_REPORT_HTTP_URL`（并使用 `VITE_REPORT_HTTP_API_KEY`）
-- `content` 为空字符串
-- 请求 JSON 顶层字段 `proactive: true`
-- 轮询会在三个人格中随机切换，并将随机角色写入 `model`
-- 返回展示规则（严格）：
-  - 若返回 `choices=ind`（含 `preview.choices=ind`）视为无有效回复，不显示
-  - 仅当返回中存在 `x-proactive` 且可提炼出文本时，才序列化到课堂角色气泡
-  - 其它返回一律不显示
-
-## 6.4 教学文档分析（新增）
-
-- 与“专项模拟 / 课堂模拟”同级入口。
-- 支持上传：PDF、PPT/PPTX、语音、图片。
-- 支持拖拽上传、文件列表预览、移除文件、发送按钮状态切换。
-- 当前版本聚焦页面与交互设计，后端分析链路可在此基础上接入。
-
-## 6.5 报告系统（训练结束）
-
-报告支持三层数据：
-
-1. 本地统计：轮次/建议/能力评分（无后端时）
-2. `x-evaluation`：大类评分、指标详情、命中样本、OU 参数
-3. `x-debug`：情绪快照展示
-
-并支持：
-
-- 有 `x-evaluation.categories` 时，用后端大类驱动能力雷达与条形图
-- `ou_params` 中文标签映射展示
-- 指标文案中文化（次数/得分/归一化得分）
-
----
-
-## 7. 工作流与后端对接说明
-
-## 7.1 配置来源
-
-通过 `src/classroom-workflow-inject.js` 把 `.env` 注入到 `window`：
-
-- `window.__WORKFLOW_INJECT__`（专项）
-- `window.__REPORT_WORKFLOW_INJECT__`（报告）
-- `window.__CLASSROOM_WORKFLOW_INJECT__`（课堂）
-
-`vendor/front/js/workflow.js` 启动时合并这些配置。
-
-## 7.2 主要客户端能力（`workflow.js`）
-
-- `sendTeacherMessageToWorkflow`：专项对话发送
-- `sendTextMessage`：专项文本入口
-- `sendClassroomBroadcast`：课堂工作流发送（常规课堂消息）
-- `sendTrainingReport`：报告接口请求
-- `sendModelSwitch`：模型/人格切换
-- `readSSEStream`：SSE 分帧解析与正文提炼
-
-## 7.3 文本 JSON 提炼
-
-`extractCompletionDialog.js` + `workflow.js` 会尽量从下列结构提炼对话正文：
-
-- `choices[0].message.content`
-- `payload/content/text/reply/message`
-- 不完整 JSON 片段（流式场景）
-- 宽松 JSON（含未加引号 key）
-
-目标是避免把 `can_feedback` 等元数据壳直接显示到气泡中。
-
-补充（课堂主动对话）：
-
-- 主动轮询的解析位于 `ClassroomSim.vue`，对 `x-proactive` 做了白名单展示。
-- `choices=ind` 会被判定为后端“无回复”标记并过滤。
-
----
-
-## 8. 环境变量（建议）
-
-以 `.env.example` 为准，典型分组：
-
-- 专项模拟：`VITE_SPECIAL_*`
-- 课堂模拟：`VITE_CLASSROOM_*`
-- 训练报告：`VITE_REPORT_*`
+- 专项：`VITE_SPECIAL_*`
+- 课堂：`VITE_CLASSROOM_*`
+- 报告：`VITE_REPORT_*`
+- 文档分析：`VITE_DOC_*`
 
 建议至少配置：
 
 - `VITE_SPECIAL_BOT_APP_KEY`
 - `VITE_CLASSROOM_BOT_APP_KEY`
-- 报告接口相关 `VITE_REPORT_HTTP_URL` / `VITE_REPORT_HTTP_API_KEY`
-
-说明：
-
-- 课堂手动对话仍使用 `VITE_CLASSROOM_*`（工作流）
-- 课堂主动轮询调试当前复用 `VITE_REPORT_HTTP_URL` 作为直连后端地址
-- 未配置 `VITE_REPORT_HTTP_URL` 时，生产构建默认直连 **`https://agent.orangeblog.us.kg/v1/chat/completions`**（仅报告与课堂主动 HTTP；专项/课堂工作流 SSE 仍由 `VITE_SPECIAL_*` / `VITE_CLASSROOM_*` 决定）
+- `VITE_REPORT_HTTP_URL`
+- `VITE_REPORT_HTTP_API_KEY`
 
 ---
 
-## 9. 调试与排障
+## 调试与排障
 
-- 浏览器控制台关键前缀：
-  - `[Workflow]`：专项与通用工作流
+- 浏览器日志前缀：
+  - `[Workflow]`：专项/通用工作流
   - `[ClassroomWorkflow]`：课堂工作流
-  - `[ClassroomProactive]`：课堂主动轮询直连请求日志
+  - `[ClassroomProactive]`：课堂主动轮询
 - SSE 常见问题：
-  - CORS 被拦截：优先配置 `proxyUrl`
-  - 返回非 SSE：客户端会尝试按 JSON 或纯文本降级解析
+  - 跨域失败：优先检查 `vite.config.js` 代理与后端 CORS
+  - 非 SSE 返回：前端会降级按 JSON/文本尝试解析
 
 ---
 
-## 10. 安全说明
+## 安全说明
 
-- `bot_app_key`、报告 API key 属于敏感信息。
-- **`.env.local` 仅本机使用，已加入 `.gitignore`，请勿提交到任何远程仓库。**
-- 请勿将真实密钥提交到公开仓库。
-- 推荐生产环境通过后端代理签发或转发，前端仅使用受控接口。
+- `bot_app_key`、API key 等敏感信息仅应存放在 `.env.local`
+- `.env.local` 不应提交到仓库
+- 生产环境建议通过后端代理转发，避免前端暴露真实凭证
 
 ---
 
-## 11. 版本说明
+## 维护建议
 
-当前 README 对应的是本仓库“课堂主动轮询调试 + 移动端双页 + 自定义人格 + 报告可视化增强”版本。  
-若后续新增后端协议字段，请同步更新本 README 的“功能文档”和“对接说明”章节。
+- 新增后端协议字段时，请同步更新：
+  - 上传规则
+  - 环境变量章节
+  - 功能与调试说明
