@@ -63,7 +63,7 @@
 <body>
 
   <h1>教师训练智能体 · 前端方案说明书</h1>
-  <p>用途：技术交付与评审。<br />形态：单页说明 + 内嵌矢量流程图（无外部脚本依赖，可离线用浏览器打开）。</p>
+  <p>用途：技术交付与评审。<br />形态：单页说明 + 内嵌矢量流程图（无外部脚本依赖，可离线用浏览器打开）。安装、脚本与 <code>.env</code> 以仓库根目录 <strong>README</strong> 为准；思维导图与导出实现细节见同目录 <strong>mindmap-rendering-architecture.md</strong>。</p>
 
   <div class="note">
     <strong>转入 Word 的用法：</strong>（1）用 Microsoft Word「文件 → 打开」直接选择本 HTML，再另存为 docx；（2）或在浏览器中打开本页后「打印 → 另存为 PDF」，再将 PDF 插入 Word。流程图为页面内 SVG，多数情况下可随 HTML 一并进入 Word；若版式有偏差，可在浏览器中对某张图复制图像后粘贴到 Word。
@@ -75,7 +75,7 @@
 
   <h3>1.2 总体结构（流程图）</h3>
   <figure aria-label="图1 总体架构">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 280" width="720" height="280" role="img">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 288" width="720" height="288" role="img">
       <defs>
         <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
           <path d="M0,0 L8,4 L0,8 z" fill="#333" />
@@ -88,24 +88,25 @@
       <rect x="40" y="168" width="150" height="52" rx="6" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5"/>
       <text x="115" y="192" text-anchor="middle" font-size="12" font-family="Microsoft YaHei,sans-serif">专项训练</text>
       <text x="115" y="208" text-anchor="middle" font-size="11" fill="#444" font-family="Microsoft YaHei,sans-serif">一对一对话 + 情绪看板</text>
-      <rect x="285" y="168" width="150" height="52" rx="6" fill="#fce4ec" stroke="#c2185b" stroke-width="1.5"/>
+      <rect x="285" y="168" width="150" height="62" rx="6" fill="#fce4ec" stroke="#c2185b" stroke-width="1.5"/>
       <text x="360" y="192" text-anchor="middle" font-size="12" font-family="Microsoft YaHei,sans-serif">课堂模拟</text>
       <text x="360" y="208" text-anchor="middle" font-size="11" fill="#444" font-family="Microsoft YaHei,sans-serif">点名/广播 · 气泡 · 主动轮询</text>
+      <text x="360" y="224" text-anchor="middle" font-size="9" fill="#6d4c41" font-family="Microsoft YaHei,sans-serif">训练报告入口位于本模块内</text>
       <rect x="530" y="168" width="150" height="52" rx="6" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5"/>
-      <text x="605" y="192" text-anchor="middle" font-size="12" font-family="Microsoft YaHei,sans-serif">训练报告</text>
-      <text x="605" y="208" text-anchor="middle" font-size="11" fill="#444" font-family="Microsoft YaHei,sans-serif">评估 JSON → 弹窗</text>
+      <text x="605" y="192" text-anchor="middle" font-size="12" font-family="Microsoft YaHei,sans-serif">教学文档分析</text>
+      <text x="605" y="208" text-anchor="middle" font-size="11" fill="#444" font-family="Microsoft YaHei,sans-serif">上传 · SSE · 思维导图/导出</text>
       <line x1="360" y1="60" x2="360" y2="88" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
       <line x1="360" y1="132" x2="115" y2="165" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
       <line x1="360" y1="132" x2="360" y2="165" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
       <line x1="360" y1="132" x2="605" y2="165" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
-      <rect x="180" y="236" width="360" height="36" rx="6" fill="#eceff1" stroke="#455a64" stroke-width="1.5"/>
-      <text x="360" y="258" text-anchor="middle" font-size="11" font-family="Microsoft YaHei,sans-serif">对外：工作流 SSE（专项/课堂手动）· 直连 HTTP（课堂主动 + 报告）</text>
+      <rect x="180" y="244" width="360" height="36" rx="6" fill="#eceff1" stroke="#455a64" stroke-width="1.5"/>
+      <text x="360" y="266" text-anchor="middle" font-size="11" font-family="Microsoft YaHei,sans-serif">对外：工作流 SSE（专项/课堂手动/文档分析）· 直连 HTTP（课堂主动 + 训练报告）</text>
     </svg>
-    <figcaption>图 1　前端在浏览器内的分层与三大功能块</figcaption>
+    <figcaption>图 1　根壳下的三大主模块；训练报告仅在课堂模拟内触发，经 HTTP 评估接口落弹窗</figcaption>
   </figure>
 
   <h3>1.3 对外通道划分（补充）</h3>
-  <p>专项与课堂手动共用「智能体 SSE」形态，但使用不同的应用身份；课堂主动与训练报告使用「类 Chat Completions 的 HTTP JSON」，其中报告请求带评估语义，主动请求带主动标记且通常正文为空。开发环境可将报告与主动请求走同源代理以降低跨域成本。</p>
+  <p>专项、课堂手动与教学文档分析在工作流侧均为「智能体 SSE」类形态，但可使用不同的 <code>bot_app_key</code> 与业务字段（文档分析以文件 URL 等为主）。课堂主动与训练报告使用「类 Chat Completions 的 HTTP JSON」：主动请求带主动标记且通常正文为空；报告请求带评估语义，且<strong>仅能从课堂模拟界面触发</strong>。开发环境可将报告与主动请求走同源代理以降低跨域成本。</p>
 
   <h2>2. 核心能力</h2>
   <h3>2.1 角色选择</h3>
@@ -163,7 +164,7 @@
   </figure>
 
   <h3>2.5 情绪可视化与报告</h3>
-  <p>专项侧展示多维度情绪与随时间变化，并可消费工作流回包中的情绪调试信息；课堂侧对三名学生维护简化指标。报告在满足最低对话量后触发：全屏加载 → HTTP 取评估 → 解包结构化结果 → 弹窗展示概况、维度、建议及可选调试快照；若无后端评估块则退回本地启发式。</p>
+  <p>专项侧展示多维度情绪与随时间变化，并可消费工作流回包中的情绪调试信息；课堂侧对三名学生维护简化指标。<strong>训练报告</strong>在满足最低对话量等条件后，由<strong>课堂模拟内的按钮</strong>触发（非侧栏）：加载层 → HTTP 取评估 → 解包结构化结果 → 弹窗展示概况、维度、建议及可选调试快照；若无后端评估块则退回本地启发式。</p>
 
   <figure aria-label="图4 报告流程">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 100" width="640" height="100" role="img">
@@ -171,7 +172,8 @@
         <marker id="arr4" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#333"/></marker>
       </defs>
       <rect x="8" y="28" width="88" height="44" rx="6" fill="#e3f2fd" stroke="#1565c0"/>
-      <text x="52" y="55" text-anchor="middle" font-size="11" font-family="Microsoft YaHei,sans-serif">触发</text>
+      <text x="52" y="51" text-anchor="middle" font-size="10" font-family="Microsoft YaHei,sans-serif">课堂内</text>
+      <text x="52" y="64" text-anchor="middle" font-size="10" font-family="Microsoft YaHei,sans-serif">触发</text>
       <line x1="96" y1="50" x2="118" y2="50" stroke="#333" marker-end="url(#arr4)"/>
       <rect x="118" y="28" width="88" height="44" rx="6" fill="#eceff1" stroke="#455a64"/>
       <text x="162" y="55" text-anchor="middle" font-size="11" font-family="Microsoft YaHei,sans-serif">加载态</text>
@@ -200,8 +202,9 @@
     <tbody>
       <tr><td>专项对话</td><td>智能体 SSE 工作流，专用应用身份</td></tr>
       <tr><td>课堂手动</td><td>同协议，独立课堂应用身份</td></tr>
+      <tr><td>教学文档分析</td><td>上传后走 SSE 工作流（可独立 <code>bot_app_key</code>），正文多为文件 URL</td></tr>
       <tr><td>课堂主动</td><td>直连 HTTP，空消息 + 主动标记</td></tr>
-      <tr><td>训练报告</td><td>同源 HTTP 配置，带评估语义</td></tr>
+      <tr><td>训练报告</td><td>同源 HTTP，带评估语义；<strong>仅课堂模拟 UI 触发</strong></td></tr>
     </tbody>
   </table>
 
@@ -222,6 +225,7 @@
       <tr><td>图 A</td><td>应用总览</td><td>（粘贴截图）</td></tr>
       <tr><td>图 B</td><td>课堂：座位、气泡、输入与主动控件</td><td>（粘贴截图）</td></tr>
       <tr><td>图 C</td><td>报告加载与弹窗</td><td>（粘贴截图）</td></tr>
+      <tr><td>图 D</td><td>教学文档分析（上传、思维导图、导出）</td><td>（粘贴截图）</td></tr>
     </tbody>
   </table>
 
@@ -229,6 +233,7 @@
   <table>
     <thead><tr><th>版本</th><th>日期</th><th>说明</th></tr></thead>
     <tbody>
+      <tr><td>1.2</td><td>2026-04-18</td><td>与实现对齐：三主模块图、报告仅课堂内触发、文档分析通道表与配图占位</td></tr>
       <tr><td>1.1</td><td>2026-03-25</td><td>压缩实现细节；增加本 HTML 与 SVG 流程图</td></tr>
       <tr><td>1.0</td><td>2026-03-25</td><td>初稿</td></tr>
     </tbody>

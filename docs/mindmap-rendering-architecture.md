@@ -1,15 +1,20 @@
 # 教学资料分析 · 思维导图渲染 — 技术结构说明
 
+本文说明 **教学文档分析** 子系统中：工作流 SSE 结果如何还原为 `mindmap` 树、如何用 **ECharts `tree`** 渲染，以及弹窗内 **Markdown / PDF / JSON** 导出的实现要点。项目总览、模式划分与环境变量见仓库根目录 **README**；交付向架构说明见 **`前端方案说明书.md`** / **`前端方案说明书.html`**。
+
+---
+
 ## 一、技术栈与依赖
 
 | 层级 | 技术 |
 |------|------|
 | 框架 | Vue 3（`<script setup>` + Composition API） |
 | 构建 | Vite 8 |
-| 图表 | **ECharts**（通过运行时动态加载本地脚本，**非** npm 包 `echarts`） |
-| 脚本路径 | `vendor/front/js/echarts.min.js`（由 `import.meta.url` 解析为资源 URL） |
+| 图表 | **ECharts**（运行时动态加载 **本地** `vendor/front/js/echarts.min.js`，**不**依赖 npm 包 `echarts`） |
+| PDF | **html2pdf.js**（`package.json` 声明；`import()` 动态加载，构建产物中常为独立 chunk） |
+| 脚本路径 | `echarts.min.js` 由 `import.meta.url` 解析为可请求的静态资源 URL |
 
-说明：`package.json` 中未声明 `echarts` 依赖；组件内 `ensureEchartsLoaded()` 向页面插入 `<script>`，挂载到 `window.echarts` 后使用。
+说明：组件内 `ensureEchartsLoaded()` 向页面插入 `<script>`，挂载到 `window.echarts` 后再 `echarts.init`；与图表无关的 **PDF** 栅格化仅使用 **html2pdf.js**。
 
 ---
 
@@ -141,4 +146,4 @@ computed: workflowViz                  // 优先 report.workflowRawText，否则
 | **PDF** | 动态 `import('html2pdf.js')`，将不可见的 DOM 片段（含中文 Web 字体栈）栅格化为 A4 PDF 后下载；导出中按钮显示「PDF…」并禁用。 |
 | **JSON** | 与原先一致：结构化 `mindmap` / `diagnosis` / `workflow` 元数据。 |
 
-依赖：`html2pdf.js`（`package.json`），构建时按路由拆分为独立 chunk。
+依赖：`html2pdf.js`（`package.json`）。Vite 会对动态 `import('html2pdf.js')` 做代码分割，产物中常见为单独 JS chunk，首屏不阻塞思维导图逻辑。
