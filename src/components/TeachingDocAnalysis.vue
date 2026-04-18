@@ -748,7 +748,8 @@ function buildMindmapSeriesOption(containerEl) {
   return {
     type: 'tree',
     orient: 'LR',
-    roam: true,
+    // 仅保留拖拽平移，避免 ECharts 注册 wheel/mousewheel 监听导致 Violation 提示
+    roam: 'move',
     initialTreeDepth: -1,
     top: '6%',
     left: '10%',

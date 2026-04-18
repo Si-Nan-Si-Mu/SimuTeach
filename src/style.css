@@ -54,6 +54,40 @@ body {
   margin: 0;
 }
 
+:root {
+  --app-cursor: auto;
+  --app-cursor-active: pointer;
+}
+
+html,
+body,
+#app,
+#app * {
+  cursor: var(--app-cursor), auto !important;
+}
+
+a,
+button,
+[role='button'],
+input:not(:disabled),
+select:not(:disabled),
+textarea:not(:disabled),
+summary,
+.sidebar-btn,
+.char-card,
+.student-seat,
+.broadcast-btn,
+.classroom-report-btn,
+.proactive-debug-btn {
+  cursor: var(--app-cursor-active), pointer !important;
+}
+
+button:disabled,
+[aria-disabled='true'],
+.is-disabled {
+  cursor: not-allowed !important;
+}
+
 h1,
 h2 {
   font-family: var(--heading);
