@@ -7,6 +7,7 @@ import TeachingDocAnalysis from './components/TeachingDocAnalysis.vue'
 import {
   buildAbilityViewFromXe,
   buildEvaluationHtml,
+  buildReportSpecialTrainingHtml,
   buildSuggestionsFromXe,
   buildTrainingOverviewHtml,
   buildXDebugSection,
@@ -21,6 +22,12 @@ const currentMode = ref('special')
 const mobileSidebarOpen = ref(false)
 
 const specialRef = ref(null)
+/** 课堂模拟内「生成报告」加载层挂载点（仅遮挡本模块，不挡侧栏） */
+const classroomReportHostRef = ref(null)
+/** 生成报告请求进行中：用于禁用侧栏按钮、课堂内恢复进度条 */
+const reportGenerationBusy = ref(false)
+/** 与加载条同步的进度（0–100），离开课堂页后仍递增，返回时可恢复显示 */
+const reportGenerationPercent = ref(8)
 
 const chatHeaderName = ref('😔 李大志')
 const chatHeaderType = ref('习得性无助型')
@@ -283,6 +290,59 @@ const onStudentSelectedFull = (student) => {
     : { ...(initialEmotionByStudentId[nid] || { joy: 50, activation: 50, anxiety: 50 }) }
 
   syncWindowApp()
+}
+
+function goToClassroomSimFromDocAnalysis() {
+  currentMode.value = 'classroom'
+  mobileSidebarOpen.value = false
+}
+
+/** 与侧栏一致的三人格，用于报告加载中的「专项训练」快捷跳转 */
+const SPECIAL_TRAINING_REPORT_SHORTCUTS = [
+  {
+    id: 'dazhi',
+    name: '李大志',
+    personality: '习得性无助型',
+    avatar: '😔',
+    color: '#e74c3c',
+    bgGradient: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
+    tagline: '"我觉得我不行……"',
+    desc: '内向沉默，长期被忽视，有明显的习得性无助倾向。回答问题时总低着头，声音很小。',
+    traits: { confidence: 15, expressiveness: 25, anxiety: 85, motivation: 20, socialSkill: 30 },
+    traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
+  },
+  {
+    id: 'yiming',
+    name: '张一鸣',
+    personality: '调皮捣蛋',
+    avatar: '😎',
+    color: '#3498db',
+    bgGradient: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
+    tagline: '"老师！我有个问题！"',
+    desc: '活泼好动，思维跳跃，课堂上总爱插嘴。聪明但注意力不集中，需要老师引导其专注。',
+    traits: { confidence: 80, expressiveness: 90, anxiety: 20, motivation: 65, socialSkill: 85 },
+    traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
+  },
+  {
+    id: 'xiaorou',
+    name: '林暖暖',
+    personality: '乖巧敏感',
+    avatar: '🥺',
+    color: '#9b59b6',
+    bgGradient: 'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)',
+    tagline: '"老师，你是不是生气了……"',
+    desc: '敏感细腻，善于察言观色，情绪容易受外界影响。很在意老师的评价，容易过度解读。',
+    traits: { confidence: 35, expressiveness: 55, anxiety: 70, motivation: 50, socialSkill: 60 },
+    traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
+  },
+]
+
+function jumpToSpecialTrainingFromReportLoading(studentId) {
+  const row = SPECIAL_TRAINING_REPORT_SHORTCUTS.find((s) => s.id === studentId)
+  if (!row) return
+  hideReportLoading({ completing: false })
+  onStudentSelectedFull({ ...row })
+  mobileSidebarOpen.value = false
 }
 
 function resetSession() {
@@ -585,6 +645,7 @@ async function showReportModal(reportApiResponse = null) {
   const abilityBarsHtml = abilityView
     ? renderXeCategoryBars(abilityView.items)
     : '<p class="report-ability-source">后端未返回可用的能力分类得分（x-evaluation.categories）。</p>'
+  const specialTrainingHtml = xe ? buildReportSpecialTrainingHtml(xe, escapeHtml) : ''
 
   const apiModel = reportRoot && typeof reportRoot.model === 'string' ? reportRoot.model : ''
   const reportDisplayName = apiModel || character.name
@@ -646,6 +707,8 @@ async function showReportModal(reportApiResponse = null) {
           </div>
         </div>
 
+        ${specialTrainingHtml}
+
         ${evalSectionHtml}
 
         <div class="report-section">
@@ -687,6 +750,14 @@ async function showReportModal(reportApiResponse = null) {
   })
   modal.querySelector('.btn-export')?.addEventListener('click', () => {
     alert('📥 报告导出功能开发中，敬请期待！')
+  })
+  modal.querySelectorAll('[data-report-modal-jump]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-report-modal-jump')
+      if (!id) return
+      modal.remove()
+      jumpToSpecialTrainingFromReportLoading(id)
+    })
   })
 
   setTimeout(() => {
@@ -775,31 +846,55 @@ async function showReportModal(reportApiResponse = null) {
   }, 200)
 }
 
-function showReportLoading() {
-  hideReportLoading()
-  reportLoadingPercent = 8
+function showReportLoading(options = {}) {
+  const scopedToClassroom = !!options.scopedToClassroom
+  const resume = !!options.resume
+  if (resume && document.getElementById('report-loading-overlay')) return
+
+  if (!resume) hideReportLoading({ completing: false })
+
+  const startPctRaw =
+    options.initialPercent != null && Number.isFinite(Number(options.initialPercent))
+      ? Number(options.initialPercent)
+      : 8
+  const startPct = Math.min(92, Math.max(8, Math.round(startPctRaw)))
+  reportLoadingPercent = startPct
+  reportGenerationPercent.value = startPct
+
   const el = document.createElement('div')
   el.id = 'report-loading-overlay'
-  el.className = 'report-loading-overlay'
+  el.className = scopedToClassroom
+    ? 'report-loading-overlay report-loading-overlay--classroom-scoped'
+    : 'report-loading-overlay'
   el.setAttribute('role', 'status')
   el.setAttribute('aria-busy', 'true')
   el.setAttribute('aria-live', 'polite')
   el.setAttribute('aria-label', '正在生成报告')
+  const scopedHint = scopedToClassroom
+    ? '<p class="report-loading-scoped-hint">生成期间可使用<strong>左侧栏</strong>切换其他模块；课堂模拟主界面暂时不可操作。</p>'
+    : ''
   el.innerHTML = `
-    <div class="report-loading-card">
+    <div class="report-loading-card${scopedToClassroom ? ' report-loading-card--scoped' : ''}">
       <div class="report-loading-spinner" aria-hidden="true"></div>
       <p class="report-loading-text">正在生成报告，请稍候…</p>
+      ${scopedHint}
       <div class="report-loading-progress" aria-hidden="true">
         <div class="report-loading-progress-fill" id="report-loading-progress-fill" style="width:${reportLoadingPercent}%;"></div>
       </div>
       <p class="report-loading-percent" id="report-loading-percent">${reportLoadingPercent}%</p>
     </div>
   `
-  document.body.appendChild(el)
+  const host =
+    scopedToClassroom && classroomReportHostRef.value ? classroomReportHostRef.value : document.body
+  host.appendChild(el)
   requestAnimationFrame(() => el.classList.add('report-loading-overlay--show'))
+  if (reportLoadingTimer) {
+    clearInterval(reportLoadingTimer)
+    reportLoadingTimer = null
+  }
   reportLoadingTimer = window.setInterval(() => {
-    // 预估进度：请求期间缓慢增长，完成时在 hideReportLoading 置 100%
     reportLoadingPercent = Math.min(92, reportLoadingPercent + (reportLoadingPercent < 60 ? 5 : 2))
+    reportGenerationPercent.value = reportLoadingPercent
     const fill = document.getElementById('report-loading-progress-fill')
     const label = document.getElementById('report-loading-percent')
     if (fill) fill.style.width = `${reportLoadingPercent}%`
@@ -807,22 +902,32 @@ function showReportLoading() {
   }, 220)
 }
 
-function hideReportLoading() {
+function hideReportLoading(opts = {}) {
+  const completing = !!opts.completing
   const el = document.getElementById('report-loading-overlay')
   if (!el) return
   if (reportLoadingTimer) {
     clearInterval(reportLoadingTimer)
     reportLoadingTimer = null
   }
-  reportLoadingPercent = 100
-  const fill = document.getElementById('report-loading-progress-fill')
-  const label = document.getElementById('report-loading-percent')
-  if (fill) fill.style.width = '100%'
-  if (label) label.textContent = '100%'
-  el.classList.remove('report-loading-overlay--show')
-  const remove = () => el.remove()
-  el.addEventListener('transitionend', remove, { once: true })
-  setTimeout(remove, 280)
+  if (completing) {
+    reportLoadingPercent = 100
+    reportGenerationPercent.value = 100
+    const fill = document.getElementById('report-loading-progress-fill')
+    const label = document.getElementById('report-loading-percent')
+    if (fill) fill.style.width = '100%'
+    if (label) label.textContent = '100%'
+    el.classList.remove('report-loading-overlay--show')
+    const remove = () => el.remove()
+    el.addEventListener('transitionend', remove, { once: true })
+    setTimeout(remove, 280)
+  } else {
+    try {
+      el.remove()
+    } catch (_) {
+      /* ignore */
+    }
+  }
 }
 
 let reportLoadingTimer = null
@@ -922,7 +1027,9 @@ async function requestTrainingReportDirect() {
 }
 
 async function endSession() {
-  showReportLoading()
+  reportGenerationBusy.value = true
+  reportGenerationPercent.value = 8
+  showReportLoading({ scopedToClassroom: currentMode.value === 'classroom' })
   let reportApiResponse = null
   try {
     // 报告改为前端直连后端 HTTP，不再经过 WorkflowClient
@@ -934,7 +1041,9 @@ async function endSession() {
   } catch (_) {
     /* ignore */
   } finally {
-    hideReportLoading()
+    hideReportLoading({ completing: true })
+    reportGenerationBusy.value = false
+    reportGenerationPercent.value = 8
   }
 }
 
@@ -1038,6 +1147,19 @@ onBeforeUnmount(() => {
 watch([selectedStudent, emotion, sessionId], () => {
   syncWindowApp()
 }, { deep: true })
+
+watch(
+  () => currentMode.value,
+  (mode) => {
+    if (mode !== 'classroom' || !reportGenerationBusy.value) return
+    if (document.getElementById('report-loading-overlay')) return
+    showReportLoading({
+      scopedToClassroom: true,
+      resume: true,
+      initialPercent: reportGenerationPercent.value,
+    })
+  }
+)
 </script>
 
 <template>
@@ -1061,7 +1183,6 @@ watch([selectedStudent, emotion, sessionId], () => {
       :mobile-open="mobileSidebarOpen"
       @select="onStudentSelectedFull"
       @workflow-data="showWorkflowDataModal"
-      @report="endSession"
       @switch-mode="(m) => (currentMode = m)"
       @close-mobile="mobileSidebarOpen = false"
     />
@@ -1076,11 +1197,18 @@ watch([selectedStudent, emotion, sessionId], () => {
             @send="onSend"
           />
 
-    <main v-show="currentMode === 'classroom'" class="chat-main">
-      <ClassroomSim :active="currentMode === 'classroom'" />
+    <main ref="classroomReportHostRef" v-show="currentMode === 'classroom'" class="chat-main">
+      <ClassroomSim
+        :active="currentMode === 'classroom'"
+        :report-busy="reportGenerationBusy"
+        @report="endSession"
+      />
     </main>
 
-    <TeachingDocAnalysis v-show="currentMode === 'doc-analysis'" />
+    <TeachingDocAnalysis
+      v-show="currentMode === 'doc-analysis'"
+      @request-classroom-sim="goToClassroomSimFromDocAnalysis"
+    />
   </div>
 </template>
 
@@ -1110,6 +1238,10 @@ body {
 .app-container .classroom-sim {
   width: 100% !important;
   height: 100% !important;
+}
+
+.app-container > .chat-main {
+  position: relative;
 }
 
 /* 报告弹窗：x-evaluation 可视化 */
@@ -1316,6 +1448,14 @@ body {
   transition: opacity 0.22s ease;
   pointer-events: auto;
 }
+
+/* 仅在课堂模拟主区域内遮罩：侧栏 / 顶栏菜单仍可点（z-index 低于移动端抽屉与菜单按钮） */
+.report-loading-overlay--classroom-scoped {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  padding: 16px;
+}
 .report-loading-overlay--show {
   opacity: 1;
 }
@@ -1329,6 +1469,104 @@ body {
   background: #fff;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
   max-width: min(360px, 100%);
+}
+
+.report-loading-card--scoped {
+  max-width: min(420px, 100%);
+}
+
+.report-loading-scoped-hint {
+  margin: -8px 0 0;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #636e72;
+  text-align: center;
+}
+
+.report-loading-scoped-hint strong {
+  color: #2d3436;
+}
+
+.report-special-jump {
+  border-top: 1px solid rgba(45, 52, 54, 0.08);
+  padding-top: 8px;
+}
+
+.report-special-rec {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #2d3436;
+}
+
+.report-special-sub {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: #636e72;
+  line-height: 1.45;
+}
+
+.report-special-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.report-special-btn {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 118px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(45, 52, 54, 0.14);
+  background: #f8f9fb;
+  color: #2d3436;
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.report-special-btn:hover {
+  background: #eef2f7;
+  border-color: rgba(108, 92, 231, 0.35);
+}
+
+.report-special-btn.is-priority {
+  border-color: rgba(108, 92, 231, 0.55);
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.2);
+  background: linear-gradient(180deg, #f5f3ff, #eef6ff);
+}
+
+.report-special-btn__score {
+  font-size: 11px;
+  font-weight: 800;
+  color: #636e72;
+  letter-spacing: 0.02em;
+}
+
+.report-special-btn__dim {
+  font-size: 12px;
+  font-weight: 800;
+  color: #2d3436;
+  line-height: 1.3;
+}
+
+.report-special-btn__who {
+  font-size: 13px;
+  font-weight: 900;
+  color: #6c5ce7;
+}
+
+.report-special-btn:focus-visible {
+  outline: 2px solid #6c5ce7;
+  outline-offset: 2px;
 }
 @media (prefers-color-scheme: dark) {
   .report-loading-card {

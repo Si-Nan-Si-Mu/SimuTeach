@@ -443,3 +443,63 @@ export function buildAbilityViewFromXe(xe) {
     values: items.map((x) => x.value)
   }
 }
+
+/** 将 x-evaluation 大类名称映射到专项模拟人格 id（与侧栏三人格一致） */
+export function mapReportCategoryToPersonalityId(categoryName) {
+  const n = String(categoryName || '')
+  if (/心理|情绪|沟通|共情|安抚/.test(n)) return 'xiaorou'
+  if (/课堂|管理|纪律|秩序|调控|组织/.test(n)) return 'yiming'
+  if (/讲解|清晰|表达|说明|阐述|授课/.test(n)) return 'dazhi'
+  return 'dazhi'
+}
+
+function personalityLabelById(id) {
+  if (id === 'yiming') return '张一鸣'
+  if (id === 'xiaorou') return '林暖暖'
+  return '李大志'
+}
+
+function personalityJumpHintById(id) {
+  if (id === 'xiaorou') return '侧重倾听、情绪回应与心理安全感'
+  if (id === 'yiming') return '侧重规则说明、注意力引导与课堂节奏'
+  return '侧重放慢节奏、支架式讲解与鼓励表达'
+}
+
+/**
+ * 报告弹窗内「专项训练」区块：按各大类得分推荐优先对练人格，并提供跳转按钮
+ */
+export function buildReportSpecialTrainingHtml(xe, escapeHtmlFn) {
+  const fn = escapeHtmlFn || ((s) => String(s))
+  const view = buildAbilityViewFromXe(xe)
+  if (!view || !view.items.length) return ''
+  const enriched = view.items.map((it) => ({
+    ...it,
+    studentId: mapReportCategoryToPersonalityId(it.name)
+  }))
+  const sorted = [...enriched].sort((a, b) => a.value - b.value || String(a.name).localeCompare(String(b.name)))
+  const top = sorted[0]
+  const hintLine = `根据大类得分，「${fn(top.name)}」相对较弱（${top.value} 分），建议优先与 <strong>${fn(
+    personalityLabelById(top.studentId)
+  )}</strong> 开展专项对练（${fn(personalityJumpHintById(top.studentId))}）。`
+
+  const btns = enriched
+    .map((it) => {
+      const sid = it.studentId
+      const isPri = it.key === top.key && it.name === top.name
+      return `<button type="button" class="report-special-btn${isPri ? ' is-priority' : ''}" data-report-modal-jump="${fn(
+        sid
+      )}">
+  <span class="report-special-btn__score">${it.value} 分</span>
+  <span class="report-special-btn__dim">${fn(it.name)}</span>
+  <span class="report-special-btn__who">${fn(personalityLabelById(sid))}</span>
+</button>`
+    })
+    .join('')
+
+  return `<div class="report-section report-special-jump">
+  <h3>🎭 专项训练 · 人格对练</h3>
+  <p class="report-special-rec">${hintLine}</p>
+  <p class="report-special-sub">点击下方人格可跳转至「专项模拟」继续训练（将关闭本报告）。</p>
+  <div class="report-special-grid">${btns}</div>
+</div>`
+}

@@ -1,6 +1,8 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch, TransitionGroup } from 'vue'
 
+const emit = defineEmits(['request-classroom-sim'])
+
 const MAX_FILES = 10
 const FILE_RULES = [
   { exts: ['docx', 'pptx'], maxMb: 200 },
@@ -51,6 +53,7 @@ const sending = ref(false)
 const analysisBatchTotal = ref(0)
 /** 当前批次已完成数量 */
 const analysisBatchDone = ref(0)
+const exportPdfBusy = ref(false)
 const sent = ref(false)
 const dragOver = ref(false)
 const sendError = ref('')
@@ -616,6 +619,82 @@ const workflowViz = computed(() => {
   return buildWorkflowVizFromRawText(rawText)
 })
 
+/** 最后一条若明显指向「去某模块练习 / 继续优化」等，单独拆成下一步行动区 */
+function normalizeSuggestionList(suggestions) {
+  return Array.isArray(suggestions)
+    ? suggestions.map((x) => String(x ?? '').trim()).filter(Boolean)
+    : []
+}
+
+/** 指向课堂 / 模块演练类「行动尾句」 */
+function isClassroomPracticeNextStep(text) {
+  const s = String(text || '').trim()
+  if (s.length < 4) return false
+  return /(课堂模拟|课题模拟|专项模拟|教学文档分析|仿真训练|训练模块|实训|去.*(?:练习|实训|模块|模拟)|前往.*(?:模块|训练|模拟)|继续(?:练习|优化|实训|训练|巩固)|动手(?:练习|实操)?|实操|练一练|练习\s*路径|建议.*(?:去|到|前往)|巩固|演练|实践|见习)/i.test(
+    s
+  )
+}
+
+/** 指向教学材料 / 课件修订类「行动尾句」（与课堂跳转区分） */
+function isMaterialImprovementNextStep(text) {
+  const s = String(text || '').trim()
+  if (s.length < 4) return false
+  return /(继续完善|完善教学(?:材料|资料|文稿)|完善(?:材料|资料|课件)|优化(?:教学)?(?:材料|课件|资料)|补充(?:教学)?(?:材料|内容|案例)|丰富(?:教学)?(?:案例|材料|内容)|修订(?:课件|文稿|材料)|教学(?:材料|资料|课件).{0,8}(?:完善|优化|补充|修订)|(?:材料|课件|资料).{0,6}(?:需|待|可)(?:完善|优化|补充))/i.test(
+    s
+  )
+}
+
+function classifyTrailingSuggestion(text) {
+  /** 含「材料/课件」的完善类尾句优先，避免命中「继续优化…」里的课堂类规则 */
+  if (isMaterialImprovementNextStep(text)) return 'material'
+  if (isClassroomPracticeNextStep(text)) return 'classroom'
+  return null
+}
+
+function splitDiagnosisSuggestions(suggestions) {
+  const list = normalizeSuggestionList(suggestions)
+  if (!list.length) return { regular: [], nextStep: null, nextKind: null }
+  const last = list[list.length - 1]
+  const kind = classifyTrailingSuggestion(last)
+  if (kind) return { regular: list.slice(0, -1), nextStep: last, nextKind: kind }
+  return { regular: list, nextStep: null, nextKind: null }
+}
+
+const diagnosisSuggestionsDisplay = computed(() =>
+  splitDiagnosisSuggestions(workflowViz.value?.diagnosis?.suggestions)
+)
+
+function formatDiagnosisScoreToken(n) {
+  if (Number.isInteger(n)) return String(n)
+  const t = Number(n).toFixed(1)
+  return t.endsWith('.0') ? String(Math.round(Number(n))) : t
+}
+
+/** 将 diagnosis.score 转为进度条百分比与展示文案（≤10 视为十分制） */
+function parseDiagnosisScore(diagnosis) {
+  if (!diagnosis || typeof diagnosis !== 'object') return null
+  const raw = diagnosis.score ?? diagnosis.Score
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return null
+  if (n <= 10) {
+    const percent = Math.min(100, (n / 10) * 100)
+    return {
+      percent,
+      label: `${formatDiagnosisScoreToken(n)} / 10`,
+      band: percent >= 75 ? 'high' : percent >= 50 ? 'mid' : 'low',
+    }
+  }
+  const capped = Math.min(100, n)
+  return {
+    percent: capped,
+    label: `${Math.round(n)} / 100`,
+    band: capped >= 75 ? 'high' : capped >= 50 ? 'mid' : 'low',
+  }
+}
+
+const diagnosisScoreViz = computed(() => parseDiagnosisScore(workflowViz.value?.diagnosis))
+
 const visibleDebugLogs = computed(() => {
   if (showPreviousDebugLogs.value) return debugLogs.value
   return debugLogs.value.slice(0, 10)
@@ -703,6 +782,77 @@ function buildMindmapSeriesOption(containerEl) {
     expandAndCollapse: true,
     animationDuration: 500,
     animationDurationUpdate: 700,
+  }
+}
+
+/**
+ * 导出 PDF 用：离屏渲染与弹窗一致的 ECharts 树图，截图为 PNG（html2pdf 无法复刻 canvas 导图）。
+ */
+async function captureMindmapAsDataUrl(mindmap) {
+  if (!mindmap || typeof mindmap !== 'object') return null
+  const echartsLib = await ensureEchartsLoaded().catch(() => null)
+  if (!echartsLib) return null
+  const treeData = buildMindmapTreeData(mindmap)
+  if (!treeData) return null
+
+  const W = 800
+  const H = 640
+  const host = document.createElement('div')
+  host.setAttribute('data-pdf-mindmap-capture', '1')
+  host.style.cssText = [
+    'position:fixed',
+    'left:0',
+    'top:0',
+    `width:${W}px`,
+    `height:${H}px`,
+    'margin:0',
+    'padding:0',
+    'opacity:0.02',
+    'pointer-events:none',
+    'z-index:2147483646',
+    'background:#fff',
+    'overflow:hidden',
+  ].join(';')
+
+  document.body.appendChild(host)
+  let chart = null
+  try {
+    chart = echartsLib.init(host, null, { renderer: 'canvas', width: W, height: H })
+    chart.setOption(
+      {
+        animation: false,
+        animationDuration: 0,
+        animationDurationUpdate: 0,
+        tooltip: { show: false },
+        series: [
+          {
+            data: [treeData],
+            ...buildMindmapSeriesOption(host),
+            roam: false,
+          },
+        ],
+      },
+      { notMerge: true }
+    )
+    chart.resize()
+    await new Promise((r) => requestAnimationFrame(r))
+    await new Promise((r) => requestAnimationFrame(r))
+    await new Promise((r) => setTimeout(r, 100))
+    const url = chart.getDataURL({
+      type: 'png',
+      pixelRatio: 2,
+      backgroundColor: '#ffffff',
+    })
+    return typeof url === 'string' && url.startsWith('data:image/') ? url : null
+  } catch (_) {
+    return null
+  } finally {
+    try {
+      chart?.dispose()
+    } catch (_) {
+      /* ignore */
+    }
+    if (host.parentNode) host.parentNode.removeChild(host)
   }
 }
 
@@ -816,15 +966,25 @@ function backToUploadView() {
   showAnalysisModal.value = false
 }
 
-function downloadActiveAnalysisReport() {
+/** 文档分析「建议下一步」：跳转侧栏「课堂模拟」（多生课堂演练） */
+function goToClassroomSimFromSuggestion() {
+  showAnalysisModal.value = false
+  emit('request-classroom-sim')
+}
+
+function getActiveAnalysisExportContext() {
   const report = activeFileReport.value
   const viz = report?.viz || workflowViz.value
   if (!viz || !viz.ready) {
     sendError.value = '暂无可下载的分析报告'
-    return
+    return null
   }
+  return { report, viz }
+}
+
+function buildAnalysisExportObject(report, viz) {
   const diagnosis = viz.diagnosis || {}
-  const content = {
+  return {
     file_name: report?.fileName || '未知文件',
     exported_at: new Date().toISOString(),
     workflow: {
@@ -836,22 +996,317 @@ function downloadActiveAnalysisReport() {
     },
     mindmap: viz.mindmap || null,
     diagnosis: {
+      score: diagnosis.score ?? diagnosis.Score ?? null,
       coverage: diagnosis.coverage || '',
       highlight: diagnosis.highlight || '',
       structure: diagnosis.structure || '',
       suggestions: Array.isArray(diagnosis.suggestions) ? diagnosis.suggestions : [],
     },
   }
+}
+
+function exportFilenameBase(report) {
+  const raw = (report?.fileName || 'report').replace(/[\\/:*?"<>|]/g, '_').trim() || 'report'
+  return raw.length > 96 ? raw.slice(0, 96) : raw
+}
+
+function exportTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+function triggerTextDownload(filename, text, mimeType) {
+  const blob = new Blob([text], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function mindmapToMarkdownLines(node, indent) {
+  const lines = []
+  if (!node || typeof node !== 'object') return lines
+  const name = String(node.name ?? '未命名')
+    .replace(/\r?\n/g, ' ')
+    .trim()
+  lines.push(`${indent}- ${name}`)
+  for (const c of Array.isArray(node.children) ? node.children : []) {
+    lines.push(...mindmapToMarkdownLines(c, `${indent}  `))
+  }
+  return lines
+}
+
+function buildAnalysisMarkdown(report, viz) {
+  const fileName = report?.fileName || '未知文件'
+  const d = viz.diagnosis || {}
+  const lines = []
+  lines.push('# 教学资料分析报告')
+  lines.push('')
+  lines.push(`- **文件**：${fileName}`)
+  lines.push(`- **导出时间**：${new Date().toLocaleString('zh-CN')}`)
+  lines.push(`- **工作流**：${viz.workflowName || '-'} · \`${viz.workflowRunId || '-'}\``)
+  if (viz.metrics) {
+    lines.push(
+      `- **耗时 / Token**：${viz.metrics.elapsed ?? '-'} ms · ${viz.metrics.tokenCount ?? '-'}`
+    )
+  }
+  lines.push('')
+  lines.push('## 知识点思维导图（大纲）')
+  lines.push('')
+  if (viz.mindmap && typeof viz.mindmap === 'object') {
+    lines.push(...mindmapToMarkdownLines(viz.mindmap, ''))
+  } else {
+    lines.push('_（无思维导图数据）_')
+  }
+  lines.push('')
+  lines.push('## 教学诊断')
+  lines.push('')
+  const scoreV = parseDiagnosisScore(d)
+  lines.push('### 综合得分')
+  lines.push(scoreV ? `- **${scoreV.label}**` : '- （未返回）')
+  lines.push('')
+  lines.push('### 已覆盖知识点')
+  lines.push(String(d.coverage || '-').trim() || '-')
+  lines.push('')
+  lines.push('### 待补充知识点')
+  lines.push(String(d.highlight || '-').trim() || '-')
+  lines.push('')
+  lines.push('### 综合建议')
+  const { regular: sugRegular, nextStep: sugNext, nextKind: sugNextKind } = splitDiagnosisSuggestions(
+    d.suggestions
+  )
+  if (sugRegular.length) {
+    sugRegular.forEach((item, i) => lines.push(`${i + 1}. ${item}`))
+  } else if (!sugNext) {
+    lines.push('- （无）')
+  }
+  if (sugNext) {
+    lines.push('')
+    lines.push(
+      sugNextKind === 'material' ? '### 建议落实 · 教学材料' : '### 建议下一步 · 课堂实践'
+    )
+    lines.push('')
+    lines.push(`> ${sugNext}`)
+  }
+  lines.push('')
+  lines.push('### 结构说明')
+  lines.push(String(d.structure || '-').trim() || '-')
+  lines.push('')
+  lines.push('---')
+  lines.push('*由 SimuTeach 教学资料分析生成*')
+  return lines.join('\n')
+}
+
+function buildDiagnosisScorePdfBlock(d) {
+  const v = parseDiagnosisScore(d)
+  if (!v) return ''
+  const w = Math.max(0, Math.min(100, Number(v.percent) || 0))
+  return `<div style="margin:10px 0 14px;padding:12px 14px;border-radius:10px;border:1px solid #93c5fd;background:linear-gradient(135deg,#eff6ff,#dbeafe);">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;">
+<strong style="font-size:12pt;color:#1e3a8a;">综合得分</strong>
+<span style="font-size:14pt;font-weight:800;color:#1d4ed8;white-space:nowrap;">${escapeHtml(v.label)}</span>
+</div>
+<div style="height:10px;border-radius:999px;background:#bfdbfe;overflow:hidden;">
+<div style="height:100%;width:${w}%;border-radius:999px;background:linear-gradient(90deg,#3b82f6,#1d4ed8);"></div>
+</div>
+</div>`
+}
+
+function buildAnalysisPdfHtml(report, viz, mindmapImageDataUrl = null) {
+  const fileName = escapeHtml(report?.fileName || '未知文件')
+  const d = viz.diagnosis || {}
+  const scoreBlock = buildDiagnosisScorePdfBlock(d)
+  const { regular: sugRegular, nextStep: sugNext, nextKind: sugNextKind } = splitDiagnosisSuggestions(
+    d.suggestions
+  )
+  let sugHtml = ''
+  if (sugRegular.length) {
+    sugHtml = `<ol>${sugRegular.map((x) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ol>`
+  } else if (!sugNext) {
+    sugHtml = '<p>（无）</p>'
+  }
+  const sugNextHtml = sugNext
+    ? sugNextKind === 'material'
+      ? `<div style="margin-top:10px;padding:12px 14px;border-radius:12px;border:1px solid #fb923c;border-left:4px solid #ea580c;background:linear-gradient(180deg,#fffbeb,#ffedd5);"><div style="font-size:11px;font-weight:800;color:#9a3412;letter-spacing:0.02em;margin-bottom:8px;">建议落实 · 教学材料</div><p style="margin:0;font-size:12px;line-height:1.65;color:#431407;font-weight:600;">${escapeHtml(
+          sugNext
+        )}</p></div>`
+      : `<div class="pdf-next-step" style="margin-top:10px;padding:12px 14px;border-radius:12px;border:1px solid #3b82f6;background:linear-gradient(180deg,#eff6ff,#dbeafe);"><div style="font-size:11px;font-weight:800;color:#1d4ed8;letter-spacing:0.02em;margin-bottom:8px;">建议下一步 · 课堂实践</div><p style="margin:0;font-size:12px;line-height:1.65;color:#0f172a;font-weight:600;">${escapeHtml(
+          sugNext
+        )}</p></div>`
+    : ''
+  let mindmapHtml = '<p>（无思维导图数据）</p>'
+  if (
+    mindmapImageDataUrl &&
+    typeof mindmapImageDataUrl === 'string' &&
+    mindmapImageDataUrl.startsWith('data:image/')
+  ) {
+    mindmapHtml = `<div class="pdf-mindmap" style="margin:10px 0 16px;">
+<p style="margin:0 0 8px;font-size:12px;color:#64748b;">以下为与分析窗口一致的树状思维导图（静态导出）。</p>
+<img src="${mindmapImageDataUrl}" alt="知识点思维导图" width="800" height="640" style="display:block;width:100%;max-width:800px;height:auto;margin:0 auto;border:1px solid #e2e8f0;border-radius:10px;background:#fff;box-sizing:border-box;" />
+</div>`
+  } else if (viz.mindmap && typeof viz.mindmap === 'object') {
+    const walk = (n) => {
+      if (!n || typeof n !== 'object') return ''
+      const nm = escapeHtml(String(n.name ?? '未命名').replace(/\r?\n/g, ' '))
+      const kids = Array.isArray(n.children) ? n.children.map(walk).join('') : ''
+      return `<li>${nm}${kids ? `<ul>${kids}</ul>` : ''}</li>`
+    }
+    mindmapHtml = `<p style="margin:0 0 6px;font-size:12px;color:#64748b;">导图截图不可用，以下为文本大纲：</p><ul>${walk(
+      viz.mindmap
+    )}</ul>`
+  }
+  return `
+<h1 style="font-size:18pt;margin:0 0 10px;">教学资料分析报告</h1>
+<p style="margin:4px 0;"><strong>文件</strong>：${fileName}</p>
+<p style="margin:4px 0;"><strong>导出时间</strong>：${escapeHtml(new Date().toLocaleString('zh-CN'))}</p>
+<p style="margin:4px 0;"><strong>工作流</strong>：${escapeHtml(viz.workflowName || '-')} / ${escapeHtml(
+    viz.workflowRunId || '-'
+  )}</p>
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:12px 0;" />
+<h2 style="font-size:14pt;margin:12px 0 6px;">知识点思维导图</h2>
+${mindmapHtml}
+<h2 style="font-size:14pt;margin:16px 0 6px;">教学诊断</h2>
+${scoreBlock}
+<h3 style="font-size:12pt;margin:8px 0 4px;">已覆盖知识点</h3>
+<p style="margin:4px 0;">${escapeHtml(String(d.coverage || '-'))}</p>
+<h3 style="font-size:12pt;margin:8px 0 4px;">待补充知识点</h3>
+<p style="margin:4px 0;">${escapeHtml(String(d.highlight || '-'))}</p>
+<h3 style="font-size:12pt;margin:8px 0 4px;">综合建议</h3>
+${sugHtml}${sugNextHtml}
+<h3 style="font-size:12pt;margin:8px 0 4px;">结构说明</h3>
+<p style="margin:4px 0;white-space:pre-wrap;">${escapeHtml(String(d.structure || '-'))}</p>
+`.trim()
+}
+
+function downloadActiveAnalysisReport() {
+  const ctx = getActiveAnalysisExportContext()
+  if (!ctx) return
+  const content = buildAnalysisExportObject(ctx.report, ctx.viz)
   const blob = new Blob([JSON.stringify(content, null, 2)], {
     type: 'application/json;charset=utf-8',
   })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const stamp = exportTimestamp()
   a.href = url
-  a.download = `analysis-report-${stamp}.json`
+  a.download = `analysis-${exportFilenameBase(ctx.report)}-${stamp}.json`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function downloadActiveAnalysisMarkdown() {
+  const ctx = getActiveAnalysisExportContext()
+  if (!ctx) return
+  const stamp = exportTimestamp()
+  const base = exportFilenameBase(ctx.report)
+  const md = buildAnalysisMarkdown(ctx.report, ctx.viz)
+  triggerTextDownload(`analysis-${base}-${stamp}.md`, md, 'text/markdown;charset=utf-8')
+}
+
+async function downloadActiveAnalysisPdf() {
+  const ctx = getActiveAnalysisExportContext()
+  if (!ctx) return
+  if (exportPdfBusy.value) return
+  exportPdfBusy.value = true
+  sendError.value = ''
+  let iframe = null
+  try {
+    const mod = await import('html2pdf.js')
+    const html2pdf =
+      typeof mod.default === 'function'
+        ? mod.default
+        : typeof mod.default?.default === 'function'
+          ? mod.default.default
+          : mod
+
+    let mindmapImageDataUrl = null
+    if (ctx.viz.mindmap && typeof ctx.viz.mindmap === 'object') {
+      mindmapImageDataUrl = await captureMindmapAsDataUrl(ctx.viz.mindmap)
+    }
+    const htmlBody = buildAnalysisPdfHtml(ctx.report, ctx.viz, mindmapImageDataUrl)
+    iframe = document.createElement('iframe')
+    iframe.setAttribute('aria-hidden', 'true')
+    iframe.setAttribute('title', 'pdf-export')
+    iframe.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:0',
+      'width:816px',
+      'height:1188px',
+      'margin:0',
+      'border:0',
+      'opacity:0.02',
+      'pointer-events:none',
+      'z-index:2147483000',
+      'background:#fff',
+    ].join(';')
+
+    document.body.appendChild(iframe)
+    const doc = iframe.contentDocument
+    if (!doc) throw new Error('无法创建导出文档')
+
+    const baseCss = `body{margin:0;padding:22px 26px;font-family:system-ui,-apple-system,"Microsoft YaHei","PingFang SC",sans-serif;font-size:14px;line-height:1.58;color:#0f172a;background:#fff;}
+h1{font-size:20px;margin:0 0 12px;font-weight:800;}
+h2{font-size:16px;margin:18px 0 8px;font-weight:700;}
+h3{font-size:14px;margin:12px 0 6px;font-weight:700;}
+p{margin:6px 0;}
+ul,ol{margin:6px 0;padding-left:1.25em;}
+hr{border:none;border-top:1px solid #e2e8f0;margin:12px 0;}`
+
+    doc.open()
+    doc.write(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>${baseCss}</style></head><body>${htmlBody}</body></html>`
+    )
+    doc.close()
+
+    await new Promise((r) => requestAnimationFrame(r))
+    await new Promise((r) => requestAnimationFrame(r))
+    await new Promise((r) => setTimeout(r, 120))
+
+    const target = doc.body
+    if (!target || (target.textContent || '').trim().length < 8) {
+      throw new Error('导出内容为空')
+    }
+
+    const stamp = exportTimestamp()
+    const base = exportFilenameBase(ctx.report)
+    const w = Math.max(816, doc.documentElement.scrollWidth || 816)
+    const h = Math.ceil(Math.max(target.scrollHeight, doc.documentElement.scrollHeight || 0, 400) * 1.05)
+
+    await html2pdf()
+      .set({
+        margin: [10, 10, 10, 10],
+        filename: `analysis-${base}-${stamp}.pdf`,
+        image: { type: 'jpeg', quality: 0.92 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: w,
+          windowHeight: h,
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      })
+      .from(target)
+      .save()
+  } catch (e) {
+    sendError.value = e?.message ? `导出 PDF 失败：${e.message}` : '导出 PDF 失败'
+  } finally {
+    if (iframe?.parentNode) iframe.parentNode.removeChild(iframe)
+    exportPdfBusy.value = false
+  }
 }
 
 function normalizeFileList(listLike, baseFiles = []) {
@@ -1781,7 +2236,20 @@ onBeforeUnmount(() => {
         <div class="workflow-viz-head">
           <button type="button" class="back-upload-btn" @click="backToUploadView">✕ 关闭弹窗</button>
           <strong>知识点覆盖分析图谱</strong>
-          <button type="button" class="debug-export" @click="downloadActiveAnalysisReport">下载分析报告</button>
+          <div class="report-download-actions" role="group" aria-label="下载分析报告">
+            <button type="button" class="debug-export" @click="downloadActiveAnalysisMarkdown">Markdown</button>
+            <button
+              type="button"
+              class="debug-export debug-export--muted"
+              :disabled="exportPdfBusy"
+              @click="downloadActiveAnalysisPdf"
+            >
+              {{ exportPdfBusy ? 'PDF…' : 'PDF' }}
+            </button>
+            <button type="button" class="debug-export debug-export--muted" @click="downloadActiveAnalysisReport">
+              JSON
+            </button>
+          </div>
           <button type="button" class="debug-panel-btn debug-panel-btn--inline" @click="showDebugPanel = !showDebugPanel">
             {{ showDebugPanel ? '隐藏调试页面' : '显示调试页面' }}
           </button>
@@ -1813,16 +2281,97 @@ onBeforeUnmount(() => {
 
                 <article v-if="workflowViz.diagnosis" class="workflow-card analysis-report-card">
                   <h5>教学诊断报告</h5>
+                  <div v-if="diagnosisScoreViz" class="diag-score-card" aria-label="诊断综合得分">
+                    <div class="diag-score-card__row">
+                      <span class="diag-score-card__title">综合得分</span>
+                      <span class="diag-score-card__value">{{ diagnosisScoreViz.label }}</span>
+                    </div>
+                    <div
+                      class="diag-score-card__track"
+                      role="progressbar"
+                      :aria-valuenow="Math.round(diagnosisScoreViz.percent)"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-label="得分占比"
+                    >
+                      <div
+                        class="diag-score-card__fill"
+                        :class="`diag-score-card__fill--${diagnosisScoreViz.band}`"
+                        :style="{ width: `${diagnosisScoreViz.percent}%` }"
+                      />
+                    </div>
+                  </div>
                   <p><strong>已覆盖知识点</strong></p>
                   <p>{{ workflowViz.diagnosis.coverage || '-' }}</p>
-                  <p><strong>特补充知识点</strong></p>
+                  <p><strong>待补充知识点</strong></p>
                   <p>{{ workflowViz.diagnosis.highlight || '-' }}</p>
                   <p><strong>综合建议</strong></p>
-                  <ul class="diag-list">
-                    <li v-for="(item, idx) in workflowViz.diagnosis.suggestions || []" :key="`diag-${idx}`">
+                  <ul v-if="diagnosisSuggestionsDisplay.regular.length" class="diag-list">
+                    <li
+                      v-for="(item, idx) in diagnosisSuggestionsDisplay.regular"
+                      :key="`diag-r-${idx}`"
+                    >
                       {{ item }}
                     </li>
                   </ul>
+                  <p
+                    v-else-if="!diagnosisSuggestionsDisplay.nextStep"
+                    class="diag-suggestions-empty"
+                  >
+                    （无）
+                  </p>
+                  <aside
+                    v-if="
+                      diagnosisSuggestionsDisplay.nextStep &&
+                      diagnosisSuggestionsDisplay.nextKind === 'classroom'
+                    "
+                    class="diag-next-step diag-next-step--classroom"
+                    aria-label="前往课堂模拟实践引导"
+                  >
+                    <div class="diag-next-step__top">
+                      <span class="diag-next-step__badge">建议下一步</span>
+                    </div>
+                    <p class="diag-next-step__kicker">把分析里的建议落到课堂演练</p>
+                    <p class="diag-next-step__body">{{ diagnosisSuggestionsDisplay.nextStep }}</p>
+                    <button
+                      type="button"
+                      class="diag-next-step__jump"
+                      @click="goToClassroomSimFromSuggestion"
+                    >
+                      <span class="diag-next-step__jump-icon" aria-hidden="true">🏫</span>
+                      <span class="diag-next-step__jump-text">
+                        <span class="diag-next-step__jump-line">立即前往课堂模拟</span>
+                        <span class="diag-next-step__jump-sub">一键切换模块，边讲边练</span>
+                      </span>
+                      <span class="diag-next-step__jump-chev" aria-hidden="true">→</span>
+                    </button>
+                  </aside>
+                  <aside
+                    v-else-if="
+                      diagnosisSuggestionsDisplay.nextStep &&
+                      diagnosisSuggestionsDisplay.nextKind === 'material'
+                    "
+                    class="diag-next-step diag-next-step--material"
+                    aria-label="教学材料完善建议"
+                  >
+                    <div class="diag-next-step__top">
+                      <span class="diag-next-step__badge diag-next-step__badge--material">建议落实</span>
+                    </div>
+                    <p class="diag-next-step__kicker diag-next-step__kicker--material">
+                      优先落实这条改进，可直接上传修订版
+                    </p>
+                    <p class="diag-next-step__body diag-next-step__body--material">
+                      {{ diagnosisSuggestionsDisplay.nextStep }}
+                    </p>
+                    <button type="button" class="diag-next-step__jump diag-next-step__jump--material" @click="backToUploadView">
+                      <span class="diag-next-step__jump-icon" aria-hidden="true">📋</span>
+                      <span class="diag-next-step__jump-text">
+                        <span class="diag-next-step__jump-line">返回上传改进文档</span>
+                        <span class="diag-next-step__jump-sub">关闭本窗口后在上方重新选择文件</span>
+                      </span>
+                      <span class="diag-next-step__jump-chev" aria-hidden="true">→</span>
+                    </button>
+                  </aside>
                   <blockquote class="diag-quote">{{ workflowViz.diagnosis.structure || '-' }}</blockquote>
                 </article>
               </div>
@@ -2497,6 +3046,13 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.report-download-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .debug-export {
   border: none;
   border-radius: 8px;
@@ -2505,6 +3061,17 @@ onBeforeUnmount(() => {
   color: #e2e8f0;
   background: #2563eb;
   font-weight: 700;
+}
+
+.debug-export:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.debug-export--muted {
+  color: #1e40af;
+  background: #e0ecff;
+  border: 1px solid rgba(37, 99, 235, 0.35);
 }
 
 .debug-empty {
@@ -2886,6 +3453,213 @@ onBeforeUnmount(() => {
   padding-left: 18px;
   color: #334155;
   font-size: 12px;
+}
+
+.diag-suggestions-empty {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.diag-score-card {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #93c5fd;
+  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 45%, #dbeafe 100%);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.1);
+}
+
+.diag-score-card__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.diag-score-card__title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #1e3a8a;
+  text-transform: none;
+}
+
+.diag-score-card__value {
+  font-size: 20px;
+  font-weight: 800;
+  color: #1d4ed8;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.diag-score-card__track {
+  height: 10px;
+  border-radius: 999px;
+  background: #bfdbfe;
+  overflow: hidden;
+}
+
+.diag-score-card__fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.diag-score-card__fill--high {
+  background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+}
+
+.diag-score-card__fill--mid {
+  background: linear-gradient(90deg, #f59e0b, #ea580c);
+}
+
+.diag-score-card__fill--low {
+  background: linear-gradient(90deg, #f97316, #dc2626);
+}
+
+.diag-next-step {
+  margin: 14px 0 0;
+  padding: 14px 14px 16px;
+  border-radius: 14px;
+}
+
+.diag-next-step--classroom {
+  border: 1px solid rgba(37, 99, 235, 0.55);
+  border-left: 4px solid #2563eb;
+  background: linear-gradient(145deg, #ffffff 0%, #eff6ff 38%, #dbeafe 100%);
+  box-shadow: 0 10px 28px rgba(30, 64, 175, 0.18);
+}
+
+.diag-next-step--material {
+  border: 1px solid rgba(234, 88, 12, 0.42);
+  border-left: 4px solid #ea580c;
+  background: linear-gradient(145deg, #ffffff 0%, #fff7ed 38%, #ffedd5 100%);
+  box-shadow: 0 10px 28px rgba(154, 52, 18, 0.16);
+}
+
+.diag-next-step__top {
+  margin-bottom: 6px;
+}
+
+.diag-next-step__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #fff;
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+}
+
+.diag-next-step__badge--material {
+  background: linear-gradient(180deg, #f97316, #ea580c);
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.35);
+}
+
+.diag-next-step__kicker {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e40af;
+  letter-spacing: 0.02em;
+}
+
+.diag-next-step__kicker--material {
+  color: #9a3412;
+}
+
+.diag-next-step__body {
+  margin: 0 0 12px;
+  padding: 10px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.65;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 10px;
+  border: 1px solid rgba(147, 197, 253, 0.65);
+}
+
+.diag-next-step__body--material {
+  border-color: rgba(251, 146, 60, 0.55);
+  background: rgba(255, 255, 255, 0.88);
+  color: #431407;
+}
+
+.diag-next-step__jump {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 55%, #1e3a8a 100%);
+  box-shadow: 0 6px 20px rgba(29, 78, 216, 0.45);
+}
+
+.diag-next-step__jump:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.diag-next-step__jump:active {
+  transform: translateY(0);
+}
+
+.diag-next-step__jump:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.diag-next-step__jump--material {
+  background: linear-gradient(180deg, #ea580c 0%, #c2410c 55%, #9a3412 100%);
+  box-shadow: 0 6px 20px rgba(194, 65, 12, 0.45);
+}
+
+.diag-next-step__jump--material:focus-visible {
+  outline-color: #fdba74;
+}
+
+.diag-next-step__jump-icon {
+  flex-shrink: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.diag-next-step__jump-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diag-next-step__jump-line {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.diag-next-step__jump-sub {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.92;
+}
+
+.diag-next-step__jump-chev {
+  flex-shrink: 0;
+  font-size: 18px;
+  font-weight: 800;
+  opacity: 0.9;
 }
 
 .analysis-main-grid {

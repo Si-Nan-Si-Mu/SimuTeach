@@ -4,8 +4,17 @@ import { deepExtractAssistantDialogFromObject, normalizeAssistantDialogText } fr
 
 const props = defineProps({
   /** 由 App 控制：仅课堂模式激活轮询 */
-  active: { type: Boolean, default: true }
+  active: { type: Boolean, default: true },
+  /** 生成报告进行中：禁用本模块内「结束·生成报告」 */
+  reportBusy: { type: Boolean, default: false }
 })
+
+const emit = defineEmits(['report'])
+
+function requestTrainingReport() {
+  if (props.reportBusy) return
+  emit('report')
+}
 
 /** 与左侧专项模拟 SideBar 中三个人格一致（id 便于工作流区分对象） */
 const students = ref([
@@ -744,6 +753,16 @@ onBeforeUnmount(() => {
           <span class="pill">{{
             selectedStudent ? `当前：${selectedStudent.name}` : '当前：全班视角'
           }}</span>
+          <button
+            id="btn-classroom-report"
+            type="button"
+            class="classroom-report-btn"
+            :disabled="reportBusy"
+            :title="reportBusy ? '报告生成中，请稍候…' : '结束本节课并生成训练报告'"
+            @click="requestTrainingReport"
+          >
+            <span aria-hidden="true">📊</span> 结束 · 生成报告
+          </button>
         </div>
       </header>
 
@@ -923,6 +942,18 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <div class="classroom-report-strip">
+          <button
+            type="button"
+            class="classroom-report-btn classroom-report-btn--panel"
+            :disabled="reportBusy"
+            :title="reportBusy ? '报告生成中，请稍候…' : '结束本节课并生成训练报告'"
+            @click="requestTrainingReport"
+          >
+            <span aria-hidden="true">📊</span> 结束 · 生成报告
+          </button>
+          <p class="classroom-report-strip__hint">仅在课堂模拟内可用；专项模拟与文档分析侧栏不再提供此入口。</p>
+        </div>
         <div class="panel-body event-list">
           <div
             v-for="ev in classroomEvents"
@@ -1047,6 +1078,57 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.podium-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.classroom-report-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  background: linear-gradient(180deg, #5c2a32, #3d1b22);
+  color: #ff6b45;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.classroom-report-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.classroom-report-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.classroom-report-strip {
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid rgba(45, 52, 54, 0.08);
+  background: #fafafa;
+}
+
+.classroom-report-btn--panel {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.classroom-report-strip__hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(45, 52, 54, 0.52);
+}
+
 .seating-area {
   flex: 1 1 auto;
   min-height: 0;
@@ -1162,7 +1244,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding-top: 6px;
   padding-bottom: 16px;
-  z-index: 1;
+  /* 高于 .student-desk(2)，否则头顶气泡会被课桌/名牌裁在底下 */
+  z-index: 5;
 }
 
 .student-avatar {
@@ -1322,7 +1405,7 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   width: min(240px, calc(100% + 88px));
   pointer-events: none;
-  z-index: 5;
+  z-index: 10;
 }
 
 .speech-bubble-inner {
@@ -1350,7 +1433,7 @@ onBeforeUnmount(() => {
 .speech-bubble--reply {
   width: min(340px, calc(100vw - 32px));
   max-width: min(340px, calc(100% + 140px));
-  z-index: 8;
+  z-index: 20;
   animation: speech-bubble-pop 0.32s cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 
@@ -1391,8 +1474,10 @@ onBeforeUnmount(() => {
 }
 
 .speech-bubble-text {
+  display: block;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .speech-bubble-cursor {
@@ -1820,6 +1905,18 @@ onBeforeUnmount(() => {
     padding-left: 46px;
     border-radius: 12px;
     min-height: 74px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .podium-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .classroom-report-btn {
+    font-size: 12px;
+    padding: 7px 12px;
   }
 
   .podium-title {
@@ -1869,16 +1966,21 @@ onBeforeUnmount(() => {
     font-size: 11px;
   }
 
+  /* 小屏隐藏「课堂对话框」时间线，腾出空间给头像与头顶回复气泡 */
+  .classroom-dialog-feed {
+    display: none !important;
+  }
+
   .seating-area {
     align-items: center;
     justify-content: center;
-    padding: 44px 2px 22px;
+    padding: 44px 2px 12px;
   }
 
   .seating-grid {
     max-width: 100%;
     padding: 0 2px;
-    gap: 18px 10px;
+    gap: 22px 12px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: auto auto;
     align-items: start;
@@ -1888,7 +1990,7 @@ onBeforeUnmount(() => {
 
   .student-seat {
     max-width: none;
-    padding: 4px 2px 6px;
+    padding: 6px 2px 8px;
   }
 
   /* 小屏三角布局：上两位、下一位居中 */
@@ -1910,57 +2012,72 @@ onBeforeUnmount(() => {
   }
 
   .student-body {
-    padding-top: 6px;
-    padding-bottom: 10px;
+    padding-top: 8px;
+    padding-bottom: 12px;
   }
 
   .student-avatar {
-    width: 52px;
-    height: 52px;
-    border-radius: 16px;
-    font-size: 2rem;
+    width: 78px;
+    height: 78px;
+    border-radius: 20px;
+    font-size: 2.75rem;
   }
 
   .student-seat::before {
-    top: 46px;
+    top: 58px;
     width: 94%;
-    height: 12px;
+    height: 14px;
     filter: blur(6px);
   }
 
   .student-desk {
-    max-width: 116px;
-    min-height: 76px;
-    margin-top: -20px;
-    padding: 8px 6px 10px;
+    max-width: 138px;
+    min-height: 82px;
+    margin-top: -22px;
+    padding: 10px 7px 11px;
     border-radius: 12px;
   }
 
   .desk-nameplate--stacked {
-    gap: 5px;
-    padding: 6px 4px;
+    gap: 6px;
+    padding: 7px 5px;
   }
 
   .nameplate-name {
-    font-size: 12px;
-    line-height: 1.2;
+    font-size: 13px;
+    line-height: 1.25;
   }
 
   .nameplate-status {
-    font-size: 10px;
-    padding: 4px 6px;
+    font-size: 11px;
+    padding: 4px 7px;
   }
 
+  /* 上排两人：气泡宽度不超过半屏，避免相互遮挡与超出屏幕 */
   .speech-bubble--reply {
-    width: min(270px, 90vw);
-    max-width: 90vw;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(300px, calc(50vw - 18px));
+    max-width: calc(50vw - 18px);
+    box-sizing: border-box;
+  }
+
+  .seating-grid .student-seat:nth-child(3) .speech-bubble--reply {
+    width: min(360px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
   }
 
   .speech-bubble-inner--reply {
-    max-height: 100px;
-    font-size: 11px;
-    line-height: 1.3;
-    padding: 8px 10px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    max-height: min(220px, 36vh);
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 10px 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .teacher-bar {

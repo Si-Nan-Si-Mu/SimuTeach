@@ -14,7 +14,6 @@ const emit = defineEmits([
   'student-selected',
   'profile',
   'workflow-data',
-  'report',
   'switch-mode',
   'close-mobile'
 ])
@@ -401,19 +400,6 @@ onBeforeUnmount(() => {
         "
       >
         <span>📁</span><span v-if="!collapsed"> 工作流数据</span>
-      </button>
-      <button
-        class="sidebar-btn btn-danger"
-        id="btn-report"
-        type="button"
-        @click="
-          () => {
-            emit('report')
-            emit('close-mobile')
-          }
-        "
-      >
-        <span>📊</span><span v-if="!collapsed"> 结束 · 生成报告</span>
       </button>
     </div>
 

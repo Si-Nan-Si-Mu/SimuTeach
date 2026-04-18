@@ -128,3 +128,17 @@ computed: workflowViz                  // 优先 report.workflowRawText，否则
 ## 八、工作流侧可选优化
 
 若希望减少前端特殊处理，可在 **大模型 / 回复节点** 的提示里要求：**只输出 JSON，不要 markdown 代码块**（避免 `` ```json `` 包裹的 `Content`）。
+
+---
+
+## 九、分析报告导出（Markdown / PDF / JSON）
+
+弹窗标题栏提供三个按钮，均基于当前选中的 `activeFileReport` 与 `workflowViz`（`viz.ready`）：
+
+| 格式 | 实现要点 |
+|------|----------|
+| **Markdown** | 纯前端拼接 `.md` 文本（标题、元信息、思维导图大纲列表、诊断各节），`Blob` 触发下载。 |
+| **PDF** | 动态 `import('html2pdf.js')`，将不可见的 DOM 片段（含中文 Web 字体栈）栅格化为 A4 PDF 后下载；导出中按钮显示「PDF…」并禁用。 |
+| **JSON** | 与原先一致：结构化 `mindmap` / `diagnosis` / `workflow` 元数据。 |
+
+依赖：`html2pdf.js`（`package.json`），构建时按路由拆分为独立 chunk。
