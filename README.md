@@ -171,6 +171,7 @@ SSE 常见问题：跨域优先检查 `vite.config.js` 代理与后端 CORS；�
 ## 安全说明
 
 - `bot_app_key`、API key 等仅放在 `.env.local` 或构建机密注入渠道，**勿提交**到 Git。
+- `vendor/front/js/workflow.js` 中默认 **不** 内置任何密钥；专项/课堂/报告相关 `bot_app_key` 由 `src/classroom-workflow-inject.js` 在加载工作流脚本前从 `VITE_*` 环境变量写入 `window.__*_INJECT__` 合并进配置。
 - 生产环境建议由网关或后端代理转发智能体与报告接口，减少浏览器暴露凭证。
 
 ---

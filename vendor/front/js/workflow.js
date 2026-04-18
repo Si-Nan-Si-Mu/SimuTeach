@@ -13,8 +13,8 @@ const WORKFLOW_CONFIG = {
   // 对话端 HTTP SSE 接口地址（腾讯云智能体官方）
   endpoint: 'https://wss.lke.cloud.tencent.com/v1/qbot/chat/sse',
 
-  // 应用密钥（bot_app_key），从「应用管理」->「调用」复制
-  botAppKey: 'flJmkqArOkTVokPjjyhSLUAnWaeYKhDOMCDWvkTJzapGFuoeiPEKYIbzdakxvdZETvBzvZsgajtsVNVMqPibFvcgYddmxOufpywpKmyMkjPfzfCyEIblHNmfGMhOXlQS',
+  // 应用密钥（bot_app_key）：勿写入仓库；由 `src/classroom-workflow-inject.js` 从 VITE_SPECIAL_BOT_APP_KEY 注入
+  botAppKey: '',
 
   // 访客 ID，2-64 位，仅 [a-zA-Z0-9_-]
   visitorBizId: 'teacher-001',
@@ -38,7 +38,8 @@ const WORKFLOW_CONFIG = {
 // 训练报告：默认走直连 HTTP API（见 sendTrainingReport）；以下为历史工作流字段，保留兼容注入
 const REPORT_WORKFLOW_CONFIG = {
   endpoint: WORKFLOW_CONFIG.endpoint,
-  botAppKey: 'EpSnUFqHnRYIkpMxrNrdunZqwumDbEjWjoMPkKCUquXMgquZwWWiYiHpRLlxqRbIVhXumaTxRgUpyUzHrtkvQcNCjYBePvZoqJngEzhtvgIWVldHmAkKbiNhnadAmIIS',
+  // 历史工作流报告 Bot；勿写入仓库。需要时由 __REPORT_WORKFLOW_INJECT__.botAppKey（VITE_REPORT_BOT_APP_KEY）注入
+  botAppKey: '',
   visitorBizId: WORKFLOW_CONFIG.visitorBizId,
   workflowStatus: WORKFLOW_CONFIG.workflowStatus,
   proxyUrl: WORKFLOW_CONFIG.proxyUrl,

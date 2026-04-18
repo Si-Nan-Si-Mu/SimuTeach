@@ -7,8 +7,8 @@ const WORKFLOW_CONFIG = {
   // 对话端 HTTP SSE 接口地址（腾讯云智能体官方）
   endpoint: 'https://wss.lke.cloud.tencent.com/v1/qbot/chat/sse',
 
-  // 应用密钥（bot_app_key），从「应用管理」->「调用」复制
-  botAppKey: 'flJmkqArOkTVokPjjyhSLUAnWaeYKhDOMCDWvkTJzapGFuoeiPEKYIbzdakxvdZETvBzvZsgajtsVNVMqPibFvcgYddmxOufpywpKmyMkjPfzfCyEIblHNmfGMhOXlQS',
+  // 应用密钥（bot_app_key）：勿写入仓库；运行时应由注入对象覆盖（与 vendor 版一致）
+  botAppKey: '',
 
   // 访客 ID，2-64 位，仅 [a-zA-Z0-9_-]
   visitorBizId: 'teacher-001',
@@ -26,10 +26,10 @@ const WORKFLOW_CONFIG = {
   debug: true,
 };
 
-// 训练报告工作流（单独的 bot_app_key）
+// 训练报告工作流（单独的 bot_app_key）；勿写入仓库
 const REPORT_WORKFLOW_CONFIG = {
   endpoint: WORKFLOW_CONFIG.endpoint,
-  botAppKey: 'EpSnUFqHnRYIkpMxrNrdunZqwumDbEjWjoMPkKCUquXMgquZwWWiYiHpRLlxqRbIVhXumaTxRgUpyUzHrtkvQcNCjYBePvZoqJngEzhtvgIWVldHmAkKbiNhnadAmIIS',
+  botAppKey: '',
   visitorBizId: WORKFLOW_CONFIG.visitorBizId,
   workflowStatus: WORKFLOW_CONFIG.workflowStatus,
   proxyUrl: WORKFLOW_CONFIG.proxyUrl,
