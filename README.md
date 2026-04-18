@@ -7,7 +7,6 @@
 | 文档 | 用途 |
 |------|------|
 | [`docs/前端方案说明书.md`](docs/前端方案说明书.md) | 交付与评审：架构、能力、与后端协作要点 |
-| [`docs/前端方案说明书.html`](docs/前端方案说明书.html) | 同上内容的排版友好版，内嵌 SVG 流程图，便于导入 Word / 打印 PDF |
 | [`docs/mindmap-rendering-architecture.md`](docs/mindmap-rendering-architecture.md) | 教学文档分析：思维导图数据流、ECharts 树图与 Markdown/PDF/JSON 导出 |
 
 ---
