@@ -1,11 +1,9 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, TransitionGroup } from 'vue'
 
 const MAX_FILES = 10
 const FILE_RULES = [
-  { exts: ['pdf', 'doc', 'docx', 'ppt', 'pptx'], maxMb: 200 },
-  { exts: ['xlsx', 'xls', 'md', 'txt', 'csv'], maxMb: 20 },
-  { exts: ['pcap'], maxMb: 20 },
+  { exts: ['docx', 'pptx'], maxMb: 200 },
   { exts: ['jpg', 'jpeg', 'png'], maxMb: 50 },
 ]
 const ACCEPT_TYPES = FILE_RULES.flatMap((rule) => rule.exts.map((ext) => `.${ext}`)).join(',')
@@ -49,6 +47,10 @@ function resolveDocWorkflowEndpoint(_extra) {
 
 const files = ref([])
 const sending = ref(false)
+/** 当前批次总文件数（用于进度展示；切换模块后回到本页仍可读） */
+const analysisBatchTotal = ref(0)
+/** 当前批次已完成数量 */
+const analysisBatchDone = ref(0)
 const sent = ref(false)
 const dragOver = ref(false)
 const sendError = ref('')
@@ -60,6 +62,8 @@ const showExecutionPanel = ref(false)
 const showAnalysisModal = ref(false)
 const mindmapContainer = ref(null)
 let mindmapChart = null
+/** resize 时 setOption 合并需带上 data，避免部分 ECharts 版本清空 series */
+let mindmapSeriesData = null
 const fileReports = ref([])
 const activeReportId = ref('')
 
@@ -110,6 +114,35 @@ const totalSizeText = computed(() => {
   return `${(total / 1024 / 1024).toFixed(2)} MB`
 })
 
+const analysisProgressLine = computed(() => {
+  if (!sending.value || !analysisBatchTotal.value) return ''
+  return `批次进度 ${analysisBatchDone.value}/${analysisBatchTotal.value}`
+})
+
+/** 弱提示：底部轻量 Toast，最多叠 2 条，自动消失 */
+const docToasts = ref([])
+let docToastSeq = 0
+const docToastTimerById = new Map()
+
+function clearAllDocToasts() {
+  for (const tid of docToastTimerById.values()) {
+    window.clearTimeout(tid)
+  }
+  docToastTimerById.clear()
+  docToasts.value = []
+}
+
+function pushDocToast(text, kind = 'ok') {
+  if (typeof window === 'undefined' || !text) return
+  const id = ++docToastSeq
+  docToasts.value = [...docToasts.value, { id, text: String(text), kind }].slice(-2)
+  const tid = window.setTimeout(() => {
+    docToasts.value = docToasts.value.filter((t) => t.id !== id)
+    docToastTimerById.delete(id)
+  }, 3400)
+  docToastTimerById.set(id, tid)
+}
+
 function parseJsonTextSafe(text) {
   if (!text || typeof text !== 'string') return null
   try {
@@ -121,6 +154,51 @@ function parseJsonTextSafe(text) {
 
 function getLatestLogByLabel(label) {
   return debugLogs.value.find((item) => item.label === label) || null
+}
+
+/** 导出/摘要时优先用当前报告内保存的 SSE，其次调试面板中的最新一条 */
+function resolveWorkflowRawForExport() {
+  const r = activeFileReport.value
+  if (r?.workflowRawText && String(r.workflowRawText).trim()) return r.workflowRawText
+  const hit = getLatestLogByLabel('工作流原始响应')
+  return hit?.text || ''
+}
+
+/**
+ * 大体积 SSE 中 reply 占绝大部分；仅保留 token_stat 相关行即可重新解析成功帧，显著降内存。
+ */
+function shrinkWorkflowSseTextForStorage(fullText) {
+  if (!fullText || typeof fullText !== 'string' || fullText.length < 8000) return fullText
+  const ev = parseWorkflowSseEvents(fullText)
+  const stat = ev.filter(
+    (e) =>
+      e.event === 'token_stat' ||
+      (e.parsed && typeof e.parsed === 'object' && e.parsed.type === 'token_stat')
+  )
+  if (!stat.length) return fullText
+  return stat.map((e) => `data: ${e.raw}`).join('\n\n')
+}
+
+const MAX_DEBUG_LOG_ENTRIES = 36
+const MAX_DEBUG_TEXT_SOFT = 72 * 1024
+const MAX_DEBUG_TEXT_OTHER = 24 * 1024
+const DEBUG_COMPACT_JSON_LABELS = new Set([
+  '工作流请求JSON(file_url模式)',
+  '工作流请求(纯文本 URL)',
+  'DescribeStorageCredential 解析JSON',
+  '文件上传解析JSON',
+])
+
+function clipDebugText(label, text) {
+  if (typeof text !== 'string') return text
+  if (label === '工作流原始响应') {
+    if (text.length <= MAX_DEBUG_TEXT_SOFT) return text
+    return `...[已省略前 ${text.length - MAX_DEBUG_TEXT_SOFT} 字符，仅保留末尾 SSE 便于调试]\n${text.slice(
+      -MAX_DEBUG_TEXT_SOFT
+    )}`
+  }
+  if (text.length <= MAX_DEBUG_TEXT_OTHER) return text
+  return `${text.slice(0, MAX_DEBUG_TEXT_OTHER)}\n...[已截断 ${text.length - MAX_DEBUG_TEXT_OTHER} 字符]`
 }
 
 function getLatestLogJsonByLabel(label) {
@@ -153,43 +231,86 @@ function extractAssistantReplyFromSse(sseText) {
   return merged.trim()
 }
 
+/**
+ * 解析 SSE 文本为离散事件。兼容：\r\n、UTF-8 BOM、同一条消息内多行 data:（RFC 合并为 \n）、空行分隔消息。
+ */
 function parseWorkflowSseEvents(sseText) {
   if (!sseText || typeof sseText !== 'string') return []
-  const lines = sseText.split('\n')
+  const normalized = sseText.replace(/\r\n/g, '\n').replace(/^\uFEFF/, '')
+  const lines = normalized.split('\n')
   const events = []
   let currentEvent = ''
+  let dataParts = []
+
+  const flushMessage = () => {
+    if (!dataParts.length) return
+    const raw = dataParts.join('\n').trim()
+    dataParts = []
+    if (!raw || raw === '[DONE]') return
+    const pushOne = (rawStr, parsed) => {
+      const evName =
+        (parsed && typeof parsed === 'object' && typeof parsed.type === 'string' && parsed.type) ||
+        currentEvent ||
+        'message'
+      events.push({
+        event: evName,
+        raw: rawStr,
+        parsed,
+      })
+    }
+    try {
+      pushOne(raw, JSON.parse(raw))
+      currentEvent = ''
+      return
+    } catch (_) {
+      /* 多条 data: 未用空行分隔时，合并解析会失败，再按行尝试 */
+    }
+    let any = false
+    for (const piece of raw.split('\n')) {
+      const t = piece.trim()
+      if (!t) continue
+      try {
+        pushOne(t, JSON.parse(t))
+        any = true
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    if (!any) events.push({ event: currentEvent || 'message', raw, parsed: null })
+    currentEvent = ''
+  }
+
   for (const rawLine of lines) {
-    const line = rawLine.trim()
-    if (!line) continue
-    if (line.startsWith('event:')) {
-      currentEvent = line.slice(6).trim()
+    const line = rawLine.trimEnd()
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flushMessage()
       continue
     }
-    if (!line.startsWith('data:')) continue
-    const raw = line.slice(5).trim()
-    if (!raw) continue
-    let parsed = null
-    try {
-      parsed = JSON.parse(raw)
-    } catch (_) {
-      parsed = null
+    if (trimmed.startsWith('event:')) {
+      flushMessage()
+      currentEvent = trimmed.slice(6).trim()
+      continue
     }
-    events.push({
-      event: currentEvent || 'message',
-      raw,
-      parsed,
-    })
+    if (trimmed.startsWith('data:')) {
+      dataParts.push(trimmed.slice(5).replace(/^\s/, ''))
+      continue
+    }
+    if (dataParts.length && (line.startsWith(' ') || line.startsWith('\t'))) {
+      dataParts[dataParts.length - 1] += '\n' + line.replace(/^\s/, '')
+    }
   }
+  flushMessage()
   return events
 }
 
 function downloadLatestWorkflowRawJson() {
-  const latestRaw = getLatestLogByLabel('工作流原始响应')
-  if (!latestRaw || !latestRaw.text) {
+  const rawText = resolveWorkflowRawForExport()
+  if (!rawText) {
     sendError.value = '暂无可下载的工作流原始响应'
     return
   }
-  const events = parseWorkflowSseEvents(latestRaw.text)
+  const events = parseWorkflowSseEvents(rawText)
   const payload = {
     exported_at: new Date().toISOString(),
     source_label: '工作流原始响应',
@@ -214,8 +335,8 @@ const visualSummary = computed(() => {
   const uploadReq = getLatestLogJsonByLabel('文件上传请求(原始文件)')
   const uploadRes = getLatestLogJsonByLabel('文件上传响应状态')
   const wfRes = getLatestLogJsonByLabel('工作流响应状态')
-  const wfRawItem = getLatestLogByLabel('工作流原始响应')
-  const wfRawText = wfRawItem ? wfRawItem.text : ''
+  const wfLog = getLatestLogByLabel('工作流原始响应')
+  const wfRawText = wfLog?.text || resolveWorkflowRawForExport() || ''
   const assistantReply = extractAssistantReplyFromSse(wfRawText)
   return {
     credential: credential || null,
@@ -235,36 +356,107 @@ function parseJsonSafe(value) {
   }
 }
 
+/**
+ * 大模型常把 JSON 包在 ```json ... ``` 里；外层 JSON.parse 后 Content 仍是非法 JSON 字符串，需先剥围栏再解析。
+ */
+function stripMarkdownCodeFence(str) {
+  if (typeof str !== 'string') return str
+  let s = str.trim()
+  if (!s.startsWith('```')) return s
+  const open = s.match(/^```([a-zA-Z0-9_-]*)\r?\n?/)
+  if (open) s = s.slice(open[0].length)
+  s = s.replace(/\r?\n```\s*$/, '').replace(/```\s*$/, '').trim()
+  return s
+}
+
+const WORKFLOW_NESTED_TEXT_KEYS = [
+  'Content',
+  'content',
+  'Answer',
+  'answer',
+  'Reply',
+  'reply',
+  'Output',
+  'output',
+  'Text',
+  'text',
+]
+
 function decodeWorkflowContent(rawValue) {
   if (rawValue == null) return null
-  if (typeof rawValue === 'object') return rawValue
+  if (typeof rawValue === 'object') {
+    for (const k of WORKFLOW_NESTED_TEXT_KEYS) {
+      if (typeof rawValue[k] === 'string') {
+        const nested = decodeWorkflowContent(rawValue[k])
+        if (nested && typeof nested === 'object' && (nested.mindmap || nested.diagnosis)) return nested
+      }
+    }
+    if (rawValue.mindmap || rawValue.diagnosis) return rawValue
+    return rawValue
+  }
   if (typeof rawValue !== 'string') return null
-  let current = rawValue
-  for (let i = 0; i < 6; i += 1) {
-    const parsed = parseJsonSafe(current)
+  let current = stripMarkdownCodeFence(rawValue.trim())
+  for (let i = 0; i < 10; i += 1) {
+    let parsed = parseJsonSafe(current)
+    if (!parsed && typeof current === 'string' && current.includes('```')) {
+      current = stripMarkdownCodeFence(current)
+      parsed = parseJsonSafe(current)
+    }
     if (!parsed) break
     if (typeof parsed === 'string') {
-      current = parsed
+      current = stripMarkdownCodeFence(parsed.trim())
       continue
     }
     if (parsed && typeof parsed === 'object') {
-      if (typeof parsed.Content === 'string') {
-        const nested = decodeWorkflowContent(parsed.Content)
-        return nested || parsed
+      for (const k of WORKFLOW_NESTED_TEXT_KEYS) {
+        if (typeof parsed[k] === 'string') {
+          const nested = decodeWorkflowContent(parsed[k])
+          if (nested && typeof nested === 'object') return nested || parsed
+        }
       }
+      if (parsed.mindmap || parsed.diagnosis) return parsed
       return parsed
     }
     break
   }
-  return parseJsonSafe(current)
+  return parseJsonSafe(stripMarkdownCodeFence(String(rawValue).trim()))
+}
+
+function payloadLooksWorkflowSuccess(payload) {
+  if (!payload || typeof payload !== 'object') return false
+  const sum = String(payload.status_summary ?? payload.StatusSummary ?? '')
+    .trim()
+    .toLowerCase()
+  if (sum === 'success') {
+    return Array.isArray(payload.procedures) && payload.procedures.length > 0
+  }
+  const proc0 = Array.isArray(payload.procedures) ? payload.procedures[0] : null
+  if (!proc0) return false
+  const st = String(proc0.status ?? '').toLowerCase()
+  if (st === 'success') return true
+  const wf = proc0.debugging && proc0.debugging.work_flow
+  if (wf && Array.isArray(wf.outputs) && wf.outputs.length) {
+    const tail = decodeWorkflowContent(wf.outputs[wf.outputs.length - 1])
+    if (tail && typeof tail === 'object' && (tail.mindmap || tail.diagnosis)) return true
+  }
+  return false
 }
 
 function getLatestSuccessfulWorkflowPayload(rawSseText) {
   const events = parseWorkflowSseEvents(rawSseText)
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const evt = events[i]
-    const payload = evt?.parsed?.payload
-    if (!payload || payload.status_summary !== 'success') continue
+    let payload = evt?.parsed?.payload
+    if (!payload && evt?.raw) {
+      try {
+        const again = JSON.parse(evt.raw)
+        payload = again && typeof again === 'object' ? again.payload : null
+      } catch (_) {
+        payload = null
+      }
+    }
+    if (!payload || typeof payload !== 'object') continue
+    if (!payloadLooksWorkflowSuccess(payload)) continue
     if (!Array.isArray(payload.procedures) || !payload.procedures.length) continue
     return payload
   }
@@ -281,9 +473,27 @@ function toWorkflowContentObject(workflow) {
   const outputs = Array.isArray(workflow.outputs) ? workflow.outputs : []
   for (let i = outputs.length - 1; i >= 0; i -= 1) {
     const parsed = decodeWorkflowContent(outputs[i])
-    if (parsed && typeof parsed === 'object') return parsed
+    if (parsed && typeof parsed === 'object' && (parsed.mindmap || parsed.diagnosis)) return parsed
   }
   const contents = Array.isArray(workflow.contents) ? workflow.contents : []
+  for (let i = contents.length - 1; i >= 0; i -= 1) {
+    const text = contents[i] && contents[i].text
+    const parsed = decodeWorkflowContent(text)
+    if (parsed && typeof parsed === 'object' && (parsed.mindmap || parsed.diagnosis)) return parsed
+  }
+  const nodes = Array.isArray(workflow.run_nodes) ? workflow.run_nodes : []
+  for (let i = nodes.length - 1; i >= 0; i -= 1) {
+    const name = String(nodes[i]?.node_name || '')
+    if (!name) continue
+    const maybeReply = /回复|大模型/i.test(name)
+    if (!maybeReply) continue
+    const parsed = decodeWorkflowContent(nodes[i]?.output)
+    if (parsed && typeof parsed === 'object' && (parsed.mindmap || parsed.diagnosis)) return parsed
+  }
+  for (let i = outputs.length - 1; i >= 0; i -= 1) {
+    const parsed = decodeWorkflowContent(outputs[i])
+    if (parsed && typeof parsed === 'object') return parsed
+  }
   for (let i = contents.length - 1; i >= 0; i -= 1) {
     const text = contents[i] && contents[i].text
     const parsed = decodeWorkflowContent(text)
@@ -332,8 +542,19 @@ function buildWorkflowVizFromRawText(rawText) {
   const workflow = payload?.procedures?.[0]?.debugging?.work_flow || null
   const nodes = toNodeList(workflow)
   const contentObj = toWorkflowContentObject(workflow) || {}
-  const mindmap = contentObj.mindmap && typeof contentObj.mindmap === 'object' ? contentObj.mindmap : null
-  const diagnosis = contentObj.diagnosis && typeof contentObj.diagnosis === 'object' ? contentObj.diagnosis : null
+  const rawMind =
+    contentObj.mindmap ||
+    contentObj.MindMap ||
+    contentObj.mind_map ||
+    contentObj.Mindmap
+  let mindmap = rawMind && typeof rawMind === 'object' ? rawMind : null
+  if (!mindmap && typeof rawMind === 'string') {
+    const decoded = decodeWorkflowContent(rawMind)
+    if (decoded && typeof decoded === 'object' && decoded.mindmap) mindmap = decoded.mindmap
+  }
+  const diagnosis =
+    (contentObj.diagnosis && typeof contentObj.diagnosis === 'object' ? contentObj.diagnosis : null) ||
+    (contentObj.Diagnosis && typeof contentObj.Diagnosis === 'object' ? contentObj.Diagnosis : null)
   const status = toFlowStatus(nodes)
   const nodeOrder = nodes.map((n) => n.node_name).filter(Boolean)
   const nodePerf = nodes
@@ -357,7 +578,10 @@ function buildWorkflowVizFromRawText(rawText) {
   const methodTags = [
     { label: '图片理解', enabled: nodeOrder.includes('ImageUnderstand1') },
     { label: '知识检索', enabled: nodeOrder.includes('知识检索1') },
-    { label: '结构化生成', enabled: nodeOrder.includes('大模型2') },
+    {
+      label: '结构化生成',
+      enabled: nodeOrder.includes('大模型2') || nodeOrder.includes('大模型1'),
+    },
   ]
   return {
     ready: true,
@@ -383,8 +607,10 @@ function buildWorkflowVizFromRawText(rawText) {
 }
 
 const workflowViz = computed(() => {
-  const fromReport = activeFileReport.value?.viz
-  if (fromReport) return fromReport
+  const r = activeFileReport.value
+  const raw = r?.workflowRawText
+  if (raw && String(raw).trim()) return buildWorkflowVizFromRawText(raw)
+  if (r?.viz) return r.viz
   const wfRawItem = getLatestLogByLabel('工作流原始响应')
   const rawText = wfRawItem ? wfRawItem.text : ''
   return buildWorkflowVizFromRawText(rawText)
@@ -421,19 +647,99 @@ function buildMindmapTreeData(mindmap) {
   return mapNode(mindmap)
 }
 
+/** 根据容器宽度计算树图标签宽度与留白，避免右侧文字被画布裁成「…」或单字截断 */
+function getMindmapLayoutMetrics(containerEl) {
+  const w = Math.max(280, Number(containerEl?.offsetWidth) || 640)
+  const labelWidth = Math.max(120, Math.min(320, Math.floor(w * 0.42)))
+  const rightPadPct = w < 520 ? 22 : w < 720 ? 18 : 14
+  return { labelWidth, rightPadPct }
+}
+
+function buildMindmapSeriesOption(containerEl) {
+  const { labelWidth, rightPadPct } = getMindmapLayoutMetrics(containerEl)
+  const labelCommon = {
+    position: 'right',
+    verticalAlign: 'middle',
+    align: 'left',
+    fontSize: 13,
+    overflow: 'break',
+    width: labelWidth,
+    lineHeight: 18,
+  }
+  return {
+    type: 'tree',
+    orient: 'LR',
+    roam: true,
+    initialTreeDepth: -1,
+    top: '6%',
+    left: '10%',
+    bottom: '10%',
+    right: `${rightPadPct}%`,
+    symbolSize: 8,
+    layerPadding: 32,
+    lineStyle: {
+      color: '#cbd5e1',
+      width: 1.2,
+    },
+    label: {
+      ...labelCommon,
+      color: '#334155',
+    },
+    leaves: {
+      label: {
+        ...labelCommon,
+        color: '#475569',
+        fontSize: 12,
+        lineHeight: 17,
+      },
+    },
+    itemStyle: {
+      color: '#64748b',
+      borderColor: '#64748b',
+    },
+    emphasis: {
+      focus: 'descendant',
+    },
+    expandAndCollapse: true,
+    animationDuration: 500,
+    animationDurationUpdate: 700,
+  }
+}
+
 async function renderMindmapChart() {
-  if (!showAnalysisModal.value || !workflowViz.value.ready || !workflowViz.value.mindmap || !mindmapContainer.value) return
+  if (!showAnalysisModal.value || !mindmapContainer.value) return
+  if (!workflowViz.value.ready || !workflowViz.value.mindmap) {
+    if (mindmapChart) {
+      mindmapChart.dispose()
+      mindmapChart = null
+    }
+    mindmapSeriesData = null
+    return
+  }
   const echarts = await ensureEchartsLoaded().catch(() => null)
   if (!echarts) return
 
   const treeData = buildMindmapTreeData(workflowViz.value.mindmap)
-  if (!treeData) return
+  if (!treeData) {
+    if (mindmapChart) {
+      mindmapChart.dispose()
+      mindmapChart = null
+    }
+    mindmapSeriesData = null
+    return
+  }
+
+  await nextTick()
+  await new Promise((resolve) => {
+    requestAnimationFrame(() => resolve())
+  })
 
   if (mindmapChart) {
     mindmapChart.dispose()
     mindmapChart = null
   }
   mindmapChart = echarts.init(mindmapContainer.value)
+  mindmapSeriesData = [treeData]
   mindmapChart.setOption({
     tooltip: {
       trigger: 'item',
@@ -441,70 +747,69 @@ async function renderMindmapChart() {
     },
     series: [
       {
-        type: 'tree',
-        data: [treeData],
-        top: '8%',
-        left: '14%',
-        bottom: '8%',
-        right: '10%',
-        symbolSize: 10,
-        lineStyle: {
-          color: '#cbd5e1',
-          width: 1.2,
-        },
-        label: {
-          position: 'right',
-          verticalAlign: 'middle',
-          align: 'left',
-          fontSize: 13,
-          color: '#334155',
-        },
-        leaves: {
-          label: {
-            position: 'right',
-            verticalAlign: 'middle',
-            align: 'left',
-            color: '#475569',
-          },
-        },
-        itemStyle: {
-          color: '#64748b',
-          borderColor: '#64748b',
-        },
-        emphasis: {
-          focus: 'descendant',
-        },
-        expandAndCollapse: true,
-        animationDuration: 500,
-        animationDurationUpdate: 700,
+        data: mindmapSeriesData,
+        ...buildMindmapSeriesOption(mindmapContainer.value),
       },
     ],
   })
+  requestAnimationFrame(() => {
+    try {
+      mindmapChart?.resize()
+    } catch (_) {
+      /* ignore */
+    }
+  })
 }
 
+let mindmapResizeRaf = null
 function resizeMindmapChart() {
-  if (mindmapChart) mindmapChart.resize()
+  if (!mindmapContainer.value) return
+  if (mindmapResizeRaf != null) cancelAnimationFrame(mindmapResizeRaf)
+  mindmapResizeRaf = requestAnimationFrame(() => {
+    mindmapResizeRaf = null
+    if (!mindmapChart) return
+    const seriesOpt = buildMindmapSeriesOption(mindmapContainer.value)
+    mindmapChart.setOption(
+      { series: [{ ...(mindmapSeriesData ? { data: mindmapSeriesData } : {}), ...seriesOpt }] },
+      false
+    )
+    mindmapChart.resize()
+  })
 }
 
 watch(
-  () => workflowViz.value.ready,
-  async (ready) => {
-    if (ready) {
-      showExecutionPanel.value = false
-      await nextTick()
-      await renderMindmapChart()
-    }
+  () =>
+    [
+      showAnalysisModal.value ? '1' : '0',
+      workflowViz.value.ready ? '1' : '0',
+      activeReportId.value,
+      String(workflowViz.value.workflowRunId || ''),
+      String(activeFileReport.value?.updatedAt ?? ''),
+      workflowViz.value.mindmap && typeof workflowViz.value.mindmap === 'object'
+        ? String(workflowViz.value.mindmap.name || '')
+        : '',
+    ].join('\u001f'),
+  async () => {
+    if (!showAnalysisModal.value) return
+    if (workflowViz.value.ready) showExecutionPanel.value = false
+    await nextTick()
+    await renderMindmapChart()
   }
 )
 
 watch(
-  () => [showAnalysisModal.value, workflowViz.value.mindmap, activeReportId.value],
-  async ([show]) => {
-    if (!show) return
-    await nextTick()
-    await renderMindmapChart()
-  },
-  { deep: true }
+  () => showAnalysisModal.value,
+  (show) => {
+    if (!show && mindmapChart) {
+      try {
+        mindmapChart.dispose()
+      } catch (_) {
+        /* ignore */
+      }
+      mindmapChart = null
+      mindmapSeriesData = null
+    }
+  }
 )
 
 function backToUploadView() {
@@ -592,6 +897,7 @@ function normalizeFileList(listLike, baseFiles = []) {
 }
 
 function onChooseFiles(e) {
+  if (sending.value) return
   sent.value = false
   sendInfo.value = ''
   sendError.value = ''
@@ -601,7 +907,17 @@ function onChooseFiles(e) {
   }
 }
 
+function onUploadDragOver() {
+  if (sending.value) return
+  dragOver.value = true
+}
+
+function onUploadDragLeave() {
+  dragOver.value = false
+}
+
 function onDrop(e) {
+  if (sending.value) return
   dragOver.value = false
   sent.value = false
   sendInfo.value = ''
@@ -610,6 +926,7 @@ function onDrop(e) {
 }
 
 function removeFile(i) {
+  if (sending.value) return
   files.value = files.value.filter((_, idx) => idx !== i)
   sent.value = false
 }
@@ -620,11 +937,14 @@ function pushDebugLog(direction, label, data) {
   if (typeof data === 'string') text = data
   else {
     try {
-      text = JSON.stringify(data, null, 2)
+      text = DEBUG_COMPACT_JSON_LABELS.has(label)
+        ? JSON.stringify(data)
+        : JSON.stringify(data, null, 2)
     } catch (_) {
       text = String(data)
     }
   }
+  text = clipDebugText(label, text)
   debugLogs.value.unshift({
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     direction,
@@ -632,8 +952,8 @@ function pushDebugLog(direction, label, data) {
     stamp,
     text,
   })
-  if (debugLogs.value.length > 80) {
-    debugLogs.value = debugLogs.value.slice(0, 80)
+  if (debugLogs.value.length > MAX_DEBUG_LOG_ENTRIES) {
+    debugLogs.value = debugLogs.value.slice(0, MAX_DEBUG_LOG_ENTRIES)
   }
 }
 
@@ -1129,10 +1449,11 @@ async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
   if (!res.ok) {
     throw new Error(`工作流请求失败(${res.status})：${text.slice(0, 180)}`)
   }
+  const workflowRawText = text
   try {
     const parsed = JSON.parse(text)
     pushDebugLog('RECV', '工作流解析JSON', parsed)
-    return extractWorkflowText(parsed) || text
+    return { reply: extractWorkflowText(parsed) || text, workflowRawText }
   } catch (_) {
     if (isQbotSseEndpoint && text) {
       const lines = text.split('\n')
@@ -1150,26 +1471,27 @@ async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
           // ignore
         }
       }
-      if (latestExtracted) return latestExtracted
+      if (latestExtracted) return { reply: latestExtracted, workflowRawText }
     }
-    return text
+    return { reply: text, workflowRawText }
   }
 }
 
 async function onSend() {
   if (sending.value) return
   sending.value = true
+  analysisBatchTotal.value = 0
+  analysisBatchDone.value = 0
   sent.value = false
   sendError.value = ''
   sendInfo.value = ''
   try {
+    clearAllDocToasts()
     debugLogs.value = []
     showPreviousDebugLogs.value = false
     showDebugPanel.value = false
     showExecutionPanel.value = false
     showAnalysisModal.value = false
-    fileReports.value = []
-    activeReportId.value = ''
 
     if (!files.value.length) {
       if (DOC_FILE_UPLOAD_URL) {
@@ -1190,13 +1512,19 @@ async function onSend() {
       return
     }
 
+    const batchFiles = [...files.value]
+    const batchTotal = batchFiles.length
+    analysisBatchTotal.value = batchTotal
+    analysisBatchDone.value = 0
+    let openedModalThisBatch = false
+
     sendInfo.value = DOC_FILE_UPLOAD_URL
-      ? '正在执行：上传文件 -> 调用工作流...'
-      : '正在按流程执行：获取临时凭证 -> 上传文件 -> 调用工作流...'
+      ? `正在分析第 1/${batchTotal} 个文件（上传 → 工作流）…\n切换至其他模块不会中断，返回本页可继续查看。`
+      : `正在分析第 1/${batchTotal} 个文件（凭证 → 上传 → 工作流）…\n切换至其他模块不会中断，返回本页可继续查看。`
     const resultLines = []
-    for (let i = 0; i < files.value.length; i += 1) {
-      const file = files.value[i]
-      sendInfo.value = `正在发送第 ${i + 1}/${files.value.length} 个文件：${file.name}`
+    for (let i = 0; i < batchFiles.length; i += 1) {
+      const file = batchFiles[i]
+      sendInfo.value = `正在分析「${file.name}」（${i + 1}/${batchTotal}）…\n已完成 ${analysisBatchDone.value} 个；下方「文件报告」中已完成的条目可随时打开阅读。`
       const credential = await getDocUploadCredential(file)
       const workflowEndpointFromCredential =
         credential && credential.workflowUrl ? String(credential.workflowUrl).trim() : ''
@@ -1207,7 +1535,7 @@ async function onSend() {
         })
       }
       const fileUrl = await uploadFileToStorage(file, credential)
-      const reply = await sendDocWorkflowWithFileUrl(
+      const { reply, workflowRawText } = await sendDocWorkflowWithFileUrl(
         fileUrl,
         `请诊断这份教学材料：${file.name}`,
         {
@@ -1217,14 +1545,16 @@ async function onSend() {
       )
       const brief = reply ? String(reply).slice(0, 60) : '无可提取文本返回'
       resultLines.push(`${file.name} -> ${brief}`)
-      const wfRawItem = getLatestLogByLabel('工作流原始响应')
-      const rawText = wfRawItem ? wfRawItem.text : ''
+      const rawText = workflowRawText || ''
       const reportId = `${file.name}_${file.size}_${file.lastModified}`
+      const viz = buildWorkflowVizFromRawText(rawText)
+      const storedRaw = viz.ready ? shrinkWorkflowSseTextForStorage(rawText) : rawText
       const nextReport = {
         id: reportId,
         fileName: file.name,
         brief,
-        viz: buildWorkflowVizFromRawText(rawText),
+        workflowRawText: storedRaw,
+        viz,
         updatedAt: Date.now(),
       }
       const idx = fileReports.value.findIndex((x) => x.id === reportId)
@@ -1234,21 +1564,56 @@ async function onSend() {
         fileReports.value.push(nextReport)
       }
       activeReportId.value = reportId
+
+      files.value = files.value.filter(
+        (f) =>
+          !(
+            f.name === file.name &&
+            f.size === file.size &&
+            f.lastModified === file.lastModified
+          )
+      )
+      analysisBatchDone.value = i + 1
+
+      if (viz.ready && !openedModalThisBatch) {
+        openedModalThisBatch = true
+        showAnalysisModal.value = true
+      }
+
+      sendInfo.value = `「${file.name}」已完成（${i + 1}/${batchTotal}）。\n可在下方「文件报告」或弹窗中阅读；其余文件仍在队列中处理。`
+      if (viz.ready) {
+        pushDocToast(`「${file.name}」已分析完成（${i + 1}/${batchTotal}），可打开报告阅读`, 'ok')
+      } else {
+        pushDocToast(`「${file.name}」已返回（${i + 1}/${batchTotal}），未解析出完整图谱`, 'warn')
+      }
+      await nextTick()
     }
-    sendInfo.value = `发送完成：\n${resultLines.join('\n')}`
+
+    await nextTick()
+    const docInput =
+      typeof document !== 'undefined' ? document.getElementById('teaching-doc-input') : null
+    if (docInput) docInput.value = ''
+
+    sendInfo.value = `本批 ${batchTotal} 个文件已全部处理：\n${resultLines.join(
+      '\n'
+    )}\n待分析列表已随进度清空；历史报告保留在「文件报告」中。`
     sent.value = true
-    showAnalysisModal.value = true
+    pushDocToast(`本批共 ${batchTotal} 个文件已全部处理完毕`, 'done')
     if (typeof window !== 'undefined' && window.console) {
       console.log('[TeachingDoc] 文件发送完成', {
-        fileCount: files.value.length,
+        fileCount: batchTotal,
         endpoint: resolveDocWorkflowEndpoint({}),
       })
     }
   } catch (err) {
-    sendError.value = err?.message || String(err)
+    const msg = err?.message || String(err)
+    sendError.value = msg
     sent.value = false
+    pushDocToast(`分析中断：${msg.slice(0, 72)}${msg.length > 72 ? '…' : ''}`, 'warn')
   } finally {
     sending.value = false
+    analysisBatchTotal.value = 0
+    analysisBatchDone.value = 0
   }
 }
 
@@ -1257,6 +1622,7 @@ if (typeof window !== 'undefined') {
 }
 
 onBeforeUnmount(() => {
+  clearAllDocToasts()
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', resizeMindmapChart)
   }
@@ -1264,11 +1630,23 @@ onBeforeUnmount(() => {
     mindmapChart.dispose()
     mindmapChart = null
   }
+  mindmapSeriesData = null
 })
 </script>
 
 <template>
   <main class="doc-analysis-page">
+    <div class="doc-toast-host" aria-live="polite">
+      <TransitionGroup name="doc-toast" tag="div" class="doc-toast-stack">
+        <div
+          v-for="t in docToasts"
+          :key="t.id"
+          :class="['doc-toast', t.kind ? `doc-toast--${t.kind}` : '']"
+        >
+          {{ t.text }}
+        </div>
+      </TransitionGroup>
+    </div>
     <section class="doc-shell">
       <header class="doc-header">
         <div>
@@ -1277,51 +1655,79 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
+      <p
+        v-if="sending && analysisBatchTotal > 0"
+        class="analysis-batch-banner"
+        role="status"
+        aria-live="polite"
+      >
+        <strong>后台分析进行中</strong>（{{ analysisProgressLine }}）。可切换到专项模拟、课堂模拟等模块，任务不中断；回到本页后继续显示进度。已完成条目可随时在下方「文件报告」或弹窗中打开阅读。
+      </p>
+
       <div class="upload-stage" v-show="!showAnalysisModal">
-        <section
-          class="upload-dropzone"
-          :class="{ 'upload-dropzone--over': dragOver }"
-          @dragover.prevent="dragOver = true"
-          @dragleave.prevent="dragOver = false"
-          @drop.prevent="onDrop"
-        >
+        <div class="upload-stage-body">
+          <div
+            v-if="sending"
+            class="analysis-loading-overlay"
+            aria-busy="true"
+            aria-live="polite"
+            role="status"
+          >
+            <div class="analysis-loading-card">
+              <div class="analysis-loading-spinner" aria-hidden="true" />
+              <p class="analysis-loading-title">正在分析</p>
+              <p class="analysis-loading-progress">{{ analysisProgressLine }}</p>
+              <p class="analysis-loading-detail">{{ sendInfo || '正在上传并与工作流通信，请稍候…' }}</p>
+            </div>
+          </div>
+          <section
+            class="upload-dropzone"
+            :class="{ 'upload-dropzone--over': dragOver && !sending }"
+            @dragover.prevent="onUploadDragOver"
+            @dragleave.prevent="onUploadDragLeave"
+            @drop.prevent="onDrop"
+          >
           <div class="upload-emoji">🗂️</div>
           <h3>教学材料深度诊断系统</h3>
           <p class="upload-intro">基于教学大纲一致性分析，适上传教案、课件和板书笔记，系统将为您提炼知识图谱并诊断教学盲点。</p>
           <div class="upload-rule-panel">
             <p class="upload-rule-title">支持以下文件类型</p>
-            <p><strong>文档：</strong>.pdf、.doc、.docx、.ppt、.pptx（单个文件最大 200MB）</p>
-            <p>.xlsx、.xls、.md、.txt、.csv（单个文件最大 20MB）</p>
-            <p>.pcap（单个文件最大 20MB）</p>
+            <p><strong>文档（仅支持）：</strong>.docx、.pptx（单个文件最大 200MB）</p>
             <p><strong>图片：</strong>.jpg、.png、.jpeg（单个文件最大 50MB）</p>
           </div>
-          <label class="upload-btn" for="teaching-doc-input">选择文件</label>
+          <label class="upload-btn" :class="{ 'is-disabled': sending }" for="teaching-doc-input"
+            >选择文件</label
+          >
           <input
             id="teaching-doc-input"
             class="upload-input"
             type="file"
             :accept="ACCEPT_TYPES"
             multiple
+            :disabled="sending"
             @change="onChooseFiles"
           />
         </section>
 
-        <section class="file-panel">
-          <div class="file-panel-head">
-            <h4>待分析文件</h4>
-            <span>{{ files.length }} 个 · {{ totalSizeText }}</span>
-          </div>
-          <div v-if="!files.length" class="file-empty">暂未选择文件</div>
-          <ul v-else class="file-list">
-            <li v-for="(f, i) in files" :key="`${f.name}-${f.size}-${f.lastModified}`" class="file-item">
-              <div class="file-main">
-                <strong>{{ f.name }}</strong>
-                <small>{{ f.type || '未知类型' }} · {{ Math.max(1, Math.round((f.size || 0) / 1024)) }} KB</small>
-              </div>
-              <button type="button" class="file-remove" @click="removeFile(i)">移除</button>
-            </li>
-          </ul>
-        </section>
+          <section class="file-panel">
+            <div class="file-panel-head">
+              <h4>待分析文件</h4>
+              <span>{{ files.length }} 个 · {{ totalSizeText }}</span>
+            </div>
+            <div v-if="!files.length" class="file-empty">暂未选择文件</div>
+            <ul v-else class="file-list">
+              <li v-for="(f, i) in files" :key="`${f.name}-${f.size}-${f.lastModified}`" class="file-item">
+                <div class="file-main">
+                  <strong>{{ f.name }}</strong>
+                  <small>{{ f.type || '未知类型' }} · {{ Math.max(1, Math.round((f.size || 0) / 1024)) }} KB</small>
+                </div>
+                <button type="button" class="file-remove" :disabled="sending" @click="removeFile(i)">
+                  移除
+                </button>
+              </li>
+            </ul>
+          </section>
+        </div>
 
         <footer class="doc-footer">
           <button type="button" class="send-btn" :disabled="sending" @click="onSend">
@@ -1380,7 +1786,13 @@ onBeforeUnmount(() => {
             {{ showDebugPanel ? '隐藏调试页面' : '显示调试页面' }}
           </button>
           <span v-if="workflowViz.ready" class="workflow-viz-sub">
-            {{ workflowViz.workflowName }} · {{ workflowViz.workflowRunId }}
+            {{ workflowViz.workflowName }} · {{ workflowViz.workflowRunId
+            }}<template v-if="sending && analysisBatchTotal > 0">
+              · {{ analysisProgressLine }}（其余文件后台排队）
+            </template>
+          </span>
+          <span v-else-if="sending && analysisBatchTotal > 0" class="workflow-viz-sub workflow-viz-sub--busy">
+            {{ analysisProgressLine }} · 其余文件后台分析中，可关闭弹窗先做其他操作
           </span>
         </div>
           <div class="analysis-main">
@@ -1390,6 +1802,10 @@ onBeforeUnmount(() => {
             <template v-else>
               <div class="analysis-main-grid">
                 <article v-if="workflowViz.mindmap" class="workflow-card analysis-graph-card">
+                  <p class="mindmap-roam-hint" role="note">
+                    <span class="mindmap-roam-hint__label">操作提示</span>
+                    将鼠标移到图谱上：<strong>滚轮向上放大、向下缩小</strong>；<strong>按住左键拖拽</strong>可平移整张图。
+                  </p>
                   <div class="mindmap-chart-wrap">
                     <div ref="mindmapContainer" class="mindmap-chart"></div>
                   </div>
@@ -1575,6 +1991,69 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, #f7f5ef 0%, #f2eee4 100%);
 }
 
+.doc-toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 10050;
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.doc-toast-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+}
+
+.doc-toast {
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.1);
+}
+
+.doc-toast--ok {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(239, 246, 255, 0.96);
+}
+
+.doc-toast--warn {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(255, 251, 235, 0.96);
+  color: #78350f;
+}
+
+.doc-toast--done {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(240, 253, 244, 0.96);
+  color: #14532d;
+}
+
+.doc-toast-enter-active,
+.doc-toast-leave-active {
+  transition:
+    opacity 0.28s ease,
+    transform 0.28s ease;
+}
+
+.doc-toast-enter-from,
+.doc-toast-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.doc-toast-move {
+  transition: transform 0.24s ease;
+}
+
 .doc-shell {
   max-width: 1120px;
   margin: 0 auto;
@@ -1583,6 +2062,93 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(45, 52, 54, 0.12);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 18px 40px rgba(45, 52, 54, 0.08);
+}
+
+.upload-stage {
+  position: relative;
+}
+
+.upload-stage-body {
+  position: relative;
+  min-height: 120px;
+}
+
+.analysis-batch-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: linear-gradient(90deg, rgba(239, 246, 255, 0.95), rgba(224, 242, 254, 0.75));
+  font-size: 13px;
+  line-height: 1.55;
+  color: #1e3a5f;
+}
+
+.analysis-batch-banner strong {
+  color: #1d4ed8;
+}
+
+.analysis-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.analysis-loading-card {
+  max-width: 420px;
+  padding: 28px 32px;
+  text-align: center;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 40px rgba(30, 41, 59, 0.12);
+}
+
+.analysis-loading-spinner {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  border: 3px solid rgba(52, 152, 219, 0.22);
+  border-top-color: #2d7fd8;
+  animation: analysis-spin 0.75s linear infinite;
+}
+
+.analysis-loading-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.analysis-loading-progress {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.analysis-loading-detail {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #475569;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes analysis-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .doc-header {
@@ -1675,6 +2241,12 @@ onBeforeUnmount(() => {
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+}
+
+.upload-btn.is-disabled {
+  pointer-events: none;
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .upload-input {
@@ -2058,6 +2630,10 @@ onBeforeUnmount(() => {
   color: #64748b;
 }
 
+.workflow-viz-sub--busy {
+  color: #b45309;
+}
+
 .workflow-viz-empty {
   padding: 12px;
   color: #64748b;
@@ -2314,7 +2890,7 @@ onBeforeUnmount(() => {
 
 .analysis-main-grid {
   display: grid;
-  grid-template-columns: 2.8fr 1fr;
+  grid-template-columns: minmax(0, 3.1fr) minmax(260px, 1fr);
   gap: 12px;
   padding: 0 10px 10px;
 }
@@ -2323,15 +2899,44 @@ onBeforeUnmount(() => {
   min-height: 620px;
 }
 
+.mindmap-roam-hint {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #475569;
+  background: linear-gradient(180deg, #f1f5f9, #e8eef5);
+  border: 1px solid #cbd5e1;
+}
+
+.mindmap-roam-hint__label {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e40af;
+  background: #dbeafe;
+}
+
+.mindmap-roam-hint strong {
+  color: #0f172a;
+  font-weight: 700;
+}
+
 .mindmap-chart-wrap {
   height: 100%;
   min-height: 580px;
+  overflow: visible;
 }
 
 .mindmap-chart {
   width: 100%;
   height: 100%;
   min-height: 580px;
+  overflow: visible;
 }
 
 .analysis-report-card {
