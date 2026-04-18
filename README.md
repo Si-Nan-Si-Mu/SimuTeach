@@ -46,6 +46,53 @@
 
 ---
 
+## 依赖与附属包（团队成员复现）
+
+克隆仓库后，除业务代码外，需要区分两类「包」：**npm 安装的依赖**（随 `package.json` / `package-lock.json`）与 **仓库自带的 vendor 资源**（不经过 npm，但必须保留在目录中）。
+
+### 运行环境
+
+| 项 | 说明 |
+|------|------|
+| **Node.js** | 建议使用 **Current/LTS 较新版本**（例如 **20.x** 或 **22.x**）；需支持 Vite 8 与原生 `fetch` |
+| **包管理器** | 使用 **npm**（仓库已含 `package-lock.json`，便于版本锁定） |
+| **浏览器** | 支持 ES 模块的现代浏览器（开发/预览用于本地调试） |
+
+### npm 依赖（`package.json`）
+
+安装命令：`npm install`（CI 或严格复现可用 **`npm ci`**，需先有 `package-lock.json`）。
+
+| 包名 | 类型 | 用途 |
+|------|------|------|
+| **`vue`** | `dependencies` | 应用框架（`<script setup>`、响应式 UI） |
+| **`html2pdf.js`** | `dependencies` | 教学文档分析：分析报告 **PDF** 导出（构建时按需动态 `import()`，单独 chunk） |
+| **`vite`** | `devDependencies` | 开发与生产构建工具链 |
+| **`@vitejs/plugin-vue`** | `devDependencies` | Vite 的 Vue 单文件组件编译插件 |
+
+`html2pdf.js` 作为 npm 包会附带其**传递依赖**（由 `package-lock.json` 锁定，无需手写维护）。团队复现时以 lockfile 为准即可。
+
+### 仓库内置附属资源（非 npm，勿删）
+
+以下文件**不在** `package.json` 的 `dependencies` 中，由项目直接引用，必须与源码一并检出：
+
+| 路径 | 用途 |
+|------|------|
+| **`vendor/front/js/echarts.min.js`** | ECharts 图表库（教学文档分析思维导图等；运行时 `import.meta.url` 注入 `<script>`，挂载 `window.echarts`） |
+| **`vendor/front/js/workflow.js`** | 腾讯云智能体 **qbot SSE** 客户端、`WorkflowClient` / `WorkflowDataStore` 等（由 `src/main.js` 引入） |
+| **`vendor/front/css/style.css`** | 全局样式与部分页面视觉基础 |
+
+另有与 `vendor` 对齐的副本 **`front/js/workflow.js`**（当前主入口未引用；保留仅为历史路径兼容，**复现以 `vendor/front/js/workflow.js` 为准**）。
+
+### 复现检查清单
+
+1. `node -v`、`npm -v` 正常。  
+2. 在项目根执行 **`npm ci`** 或 **`npm install`**。  
+3. 确认存在 **`vendor/front/js/echarts.min.js`** 与 **`vendor/front/js/workflow.js`**。  
+4. 复制 **`.env.example` → `.env.local`** 并按注释填写各 `VITE_*`（否则专项/课堂/报告/文档分析接口无法调用）。  
+5. **`npm run dev`** 能启动；**`npm run build`** 能产出 `dist/`。
+
+---
+
 ## 快速开始
 
 ### 1) 安装依赖
