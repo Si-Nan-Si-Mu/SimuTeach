@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps({
   headerName: { type: String, default: '😔 李大志' },
-  headerType: { type: String, default: '习得性无助型' },
+  headerType: { type: String, default: '学习动机激发（李大志）' },
   placeholder: { type: String, default: '输入你想对学生说的话…' },
   isLive: { type: Boolean, default: true },
   liveText: { type: String, default: '仿真对话中' },

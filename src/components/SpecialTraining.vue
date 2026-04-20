@@ -5,7 +5,7 @@ import EmotionPanel from './EmotionPanel.vue'
 
 const props = defineProps({
   headerName: { type: String, default: '😔 李大志' },
-  headerType: { type: String, default: '习得性无助型' },
+  headerType: { type: String, default: '学习动机激发（李大志）' },
   currentEmotion: { type: Object, default: null },
   student: { type: Object, default: null }
 })

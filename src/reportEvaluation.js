@@ -276,6 +276,124 @@ export function buildTrainingOverviewHtml(xe, localSummary, escapeHtmlFn, report
 }
 
 /**
+ * 将 x-evaluation.summary 渲染为报告 HTML（教师本课主要知识点 + 概述）
+ * 支持：字符串；字符串数组；对象（常见字段：overview / knowledge_points / key_points / points 等）
+ */
+export function buildXeSummarySectionHtml(xe, escapeHtmlFn) {
+  const fn = escapeHtmlFn || ((s) => String(s))
+  if (!xe || typeof xe !== 'object') return ''
+  const raw = xe.summary
+  if (raw == null) return ''
+  if (typeof raw === 'string') {
+    const t = raw.trim()
+    if (!t) return ''
+    return `<div class="report-section report-xe-summary">
+      <h3>📚 本课要点与概述</h3>
+      <p class="report-xe-summary-source">数据来自 <span class="report-xe-summary-tag">x-evaluation.summary</span></p>
+      <div class="report-xe-summary-body report-xe-summary-body--text">${esc(fn, t)}</div>
+    </div>`
+  }
+
+  const pickOverview = (o) => {
+    if (!o || typeof o !== 'object') return ''
+    const v =
+      o.overview ??
+      o.概要 ??
+      o.description ??
+      o.desc ??
+      o.summary_text ??
+      o.text ??
+      ''
+    return typeof v === 'string' ? v.trim() : ''
+  }
+
+  const normalizePoints = (v) => {
+    if (v == null) return []
+    if (Array.isArray(v)) {
+      return v
+        .map((item) => {
+          if (item == null) return ''
+          if (typeof item === 'string') return item.trim()
+          if (typeof item === 'object') {
+            const s = item.text || item.content || item.name || item.title || item.point || ''
+            return typeof s === 'string' ? s.trim() : ''
+          }
+          return String(item).trim()
+        })
+        .filter(Boolean)
+    }
+    if (typeof v === 'string') {
+      return v
+        .split(/\n|；|;/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    }
+    return []
+  }
+
+  const pickPoints = (o) => {
+    if (!o || typeof o !== 'object') return []
+    const keys = [
+      'knowledge_points',
+      'main_knowledge',
+      'key_points',
+      'points',
+      '知识点',
+      'main_points',
+      'highlights'
+    ]
+    for (const k of keys) {
+      if (k in o) {
+        const pts = normalizePoints(o[k])
+        if (pts.length) return pts
+      }
+    }
+    return []
+  }
+
+  if (Array.isArray(raw)) {
+    const pts = normalizePoints(raw)
+    if (!pts.length) return ''
+    return `<div class="report-section report-xe-summary">
+      <h3>📚 本课要点与概述</h3>
+      <p class="report-xe-summary-source">数据来自 <span class="report-xe-summary-tag">x-evaluation.summary</span>（数组）</p>
+      <div class="report-xe-summary-card">
+        <h4 class="report-xe-summary-h4">主要知识点</h4>
+        <ul class="report-xe-kp-list">${pts.map((p) => `<li>${esc(fn, p)}</li>`).join('')}</ul>
+      </div>
+    </div>`
+  }
+
+  if (typeof raw === 'object') {
+    const overview = pickOverview(raw)
+    const points = pickPoints(raw)
+    if (!overview && !points.length) return ''
+
+    const overviewBlock = overview
+      ? `<div class="report-xe-summary-card report-xe-summary-card--overview">
+        <h4 class="report-xe-summary-h4">教学概述</h4>
+        <div class="report-xe-summary-body report-xe-summary-body--text">${esc(fn, overview)}</div>
+      </div>`
+      : ''
+
+    const pointsBlock = points.length
+      ? `<div class="report-xe-summary-card report-xe-summary-card--points">
+        <h4 class="report-xe-summary-h4">主要知识点</h4>
+        <ul class="report-xe-kp-list">${points.map((p) => `<li>${esc(fn, p)}</li>`).join('')}</ul>
+      </div>`
+      : ''
+
+    return `<div class="report-section report-xe-summary">
+      <h3>📚 本课要点与概述</h3>
+      <p class="report-xe-summary-source">数据来自 <span class="report-xe-summary-tag">x-evaluation.summary</span></p>
+      <div class="report-xe-summary-grid">${pointsBlock}${overviewBlock}</div>
+    </div>`
+  }
+
+  return ''
+}
+
+/**
  * 根据评估大类得分生成改进建议（完全依据 x-evaluation）
  */
 export function buildSuggestionsFromXe(xe) {
@@ -444,7 +562,7 @@ export function buildAbilityViewFromXe(xe) {
   }
 }
 
-/** 将 x-evaluation 大类名称映射到专项模拟人格 id（与侧栏三人格一致） */
+/** 将 x-evaluation 大类名称映射到专项模拟学生 id（与侧栏三项专项训练一致） */
 export function mapReportCategoryToPersonalityId(categoryName) {
   const n = String(categoryName || '')
   if (/心理|情绪|沟通|共情|安抚/.test(n)) return 'xiaorou'
@@ -454,9 +572,9 @@ export function mapReportCategoryToPersonalityId(categoryName) {
 }
 
 function personalityLabelById(id) {
-  if (id === 'yiming') return '张一鸣'
-  if (id === 'xiaorou') return '林暖暖'
-  return '李大志'
+  if (id === 'yiming') return '课堂管理（张一鸣）'
+  if (id === 'xiaorou') return '心理情绪沟通（林暖暖）'
+  return '学习动机激发（李大志）'
 }
 
 function personalityJumpHintById(id) {
@@ -466,7 +584,7 @@ function personalityJumpHintById(id) {
 }
 
 /**
- * 报告弹窗内「专项训练」区块：按各大类得分推荐优先对练人格，并提供跳转按钮
+ * 报告弹窗内「专项训练」区块：按各大类得分推荐优先对练场景，并提供跳转按钮
  */
 export function buildReportSpecialTrainingHtml(xe, escapeHtmlFn) {
   const fn = escapeHtmlFn || ((s) => String(s))
@@ -497,9 +615,9 @@ export function buildReportSpecialTrainingHtml(xe, escapeHtmlFn) {
     .join('')
 
   return `<div class="report-section report-special-jump">
-  <h3>🎭 专项训练 · 人格对练</h3>
+  <h3>🎭 专项训练 · 场景对练</h3>
   <p class="report-special-rec">${hintLine}</p>
-  <p class="report-special-sub">点击下方人格可跳转至「专项模拟」继续训练（将关闭本报告）。</p>
+  <p class="report-special-sub">点击下方专项场景可跳转至「专项模拟」继续训练（将关闭本报告）。</p>
   <div class="report-special-grid">${btns}</div>
 </div>`
 }

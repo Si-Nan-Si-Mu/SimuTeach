@@ -16,12 +16,12 @@ function requestTrainingReport() {
   emit('report')
 }
 
-/** 与左侧专项模拟 SideBar 中三个人格一致（id 便于工作流区分对象） */
+/** 与左侧专项模拟 SideBar 中三项专项训练一致（id 便于工作流区分对象） */
 const students = ref([
   {
     id: 'dazhi',
     name: '李大志',
-    personality: '习得性无助',
+    personality: '学习动机激发（李大志）',
     row: 0,
     col: 0,
     avatar: '😔'
@@ -29,7 +29,7 @@ const students = ref([
   {
     id: 'yiming',
     name: '张一鸣',
-    personality: '调皮捣蛋',
+    personality: '课堂管理（张一鸣）',
     row: 0,
     col: 1,
     avatar: '😎'
@@ -37,7 +37,7 @@ const students = ref([
   {
     id: 'xiaorou',
     name: '林暖暖',
-    personality: '乖巧敏感',
+    personality: '心理情绪沟通（林暖暖）',
     row: 0,
     col: 2,
     avatar: '🥺'
@@ -166,7 +166,7 @@ function enqueueSendTask(task) {
   void runSendQueue()
 }
 
-/** 三人格初始情绪（与专项模拟一致，随课堂互动略作波动） */
+/** 三名学生初始情绪（与专项模拟一致，随课堂互动略作波动） */
 const emotionByStudentId = ref({
   dazhi: { joy: 20, activation: 15, anxiety: 75 },
   yiming: { joy: 70, activation: 85, anxiety: 15 },
@@ -251,7 +251,8 @@ const classroomEvents = ref([
     ts: Date.now(),
     kind: 'system',
     title: '课堂就绪',
-    detail: '三人格已就位：李大志、张一鸣、林暖暖。可选中单人对话或全班广播。'
+    detail:
+      '三项专项训练场景已就位：学习动机激发（李大志）、课堂管理（张一鸣）、心理情绪沟通（林暖暖）。可选中单人对话或全班广播。'
   }
 ])
 
@@ -592,12 +593,12 @@ const seatStyle = (s) => ({
   gridColumn: s.col + 1
 })
 
-/** 人格标签 → 铭牌配色（与专项模拟角色气质对应） */
-const personalityTone = (personality) => {
-  const p = String(personality || '')
-  if (p.includes('无助')) return 'confused'
-  if (p.includes('调皮')) return 'distracted'
-  if (p.includes('敏感')) return 'focus'
+/** 学生 id → 铭牌配色（与专项模拟角色气质对应） */
+const personalityTone = (s) => {
+  const id = s && typeof s === 'object' ? s.id : ''
+  if (id === 'dazhi') return 'confused'
+  if (id === 'yiming') return 'distracted'
+  if (id === 'xiaorou') return 'focus'
   return 'neutral'
 }
 
@@ -661,7 +662,7 @@ const sendProactiveTick = ({ fromManual = false } = {}) => {
   enqueueSendTask(async () => {
     workflowStreamPreview.value = ''
     const randomStudent = pickRandomProactiveStudent()
-    // 主动轮询：每次随机切换人格，并把 model 指向该人格
+    // 主动轮询：每次随机选一名学生，并把 model 指向该学生
     lastReplyTargets.value = [randomStudent.id]
     setBubbleFor(lastReplyTargets.value, { text: '', streaming: true, visible: true })
     pushClassroomEvent(
@@ -747,7 +748,7 @@ onBeforeUnmount(() => {
       <header class="podium" aria-label="讲台">
         <div class="podium-left">
           <div class="podium-title">🧑‍🏫 老师讲台</div>
-          <div class="podium-subtitle">虚拟座位表（专项模拟 · 三人格三角布局）</div>
+          <div class="podium-subtitle">虚拟座位表（专项模拟 · 三项专项训练三角布局）</div>
         </div>
         <div class="podium-right">
           <span class="pill">{{
@@ -799,7 +800,7 @@ onBeforeUnmount(() => {
             <div class="student-desk" :class="{ selected: selectedStudentId === s.id }" aria-hidden="true">
               <div class="desk-nameplate desk-nameplate--stacked">
                 <div class="nameplate-name">{{ s.name }}</div>
-                <div class="nameplate-status" :data-tone="personalityTone(s.personality)">
+                <div class="nameplate-status" :data-tone="personalityTone(s)">
                   {{ s.personality }}
                 </div>
               </div>
@@ -871,7 +872,7 @@ onBeforeUnmount(() => {
         <div class="panel-title">课堂情绪看板</div>
         <div class="panel-body emotion-panel-body">
           <div class="emotion-avg-block">
-            <div class="emotion-avg-heading">📊 三人格情绪均值</div>
+            <div class="emotion-avg-heading">📊 三名学生情绪均值</div>
             <p class="emotion-avg-hint">以下为李大志、张一鸣、林暖暖三人当前愉悦度 / 激活度 / 焦虑度的算术平均（0–100）。</p>
             <div
               v-for="dim in EMOTION_DIMS"

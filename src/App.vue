@@ -10,6 +10,7 @@ import {
   buildReportSpecialTrainingHtml,
   buildSuggestionsFromXe,
   buildTrainingOverviewHtml,
+  buildXeSummarySectionHtml,
   buildXDebugSection,
   extractXEvaluation,
   getCategoryScoresForChart,
@@ -30,12 +31,12 @@ const reportGenerationBusy = ref(false)
 const reportGenerationPercent = ref(8)
 
 const chatHeaderName = ref('😔 李大志')
-const chatHeaderType = ref('习得性无助型')
+const chatHeaderType = ref('学习动机激发（李大志）')
 
 const selectedStudent = ref({
   id: 'dazhi',
   name: '李大志',
-  personality: '习得性无助型',
+  personality: '学习动机激发（李大志）',
   avatar: '😔',
   color: '#e74c3c',
   bgGradient: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
@@ -297,12 +298,12 @@ function goToClassroomSimFromDocAnalysis() {
   mobileSidebarOpen.value = false
 }
 
-/** 与侧栏一致的三人格，用于报告加载中的「专项训练」快捷跳转 */
+/** 与侧栏一致的三项专项训练，用于报告加载中的「专项训练」快捷跳转 */
 const SPECIAL_TRAINING_REPORT_SHORTCUTS = [
   {
     id: 'dazhi',
     name: '李大志',
-    personality: '习得性无助型',
+    personality: '学习动机激发（李大志）',
     avatar: '😔',
     color: '#e74c3c',
     bgGradient: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
@@ -314,7 +315,7 @@ const SPECIAL_TRAINING_REPORT_SHORTCUTS = [
   {
     id: 'yiming',
     name: '张一鸣',
-    personality: '调皮捣蛋',
+    personality: '课堂管理（张一鸣）',
     avatar: '😎',
     color: '#3498db',
     bgGradient: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
@@ -326,7 +327,7 @@ const SPECIAL_TRAINING_REPORT_SHORTCUTS = [
   {
     id: 'xiaorou',
     name: '林暖暖',
-    personality: '乖巧敏感',
+    personality: '心理情绪沟通（林暖暖）',
     avatar: '🥺',
     color: '#9b59b6',
     bgGradient: 'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)',
@@ -640,6 +641,7 @@ async function showReportModal(reportApiResponse = null) {
       </div>
     </div>`
   const evalSectionHtml = xe ? buildEvaluationHtml(xe, escapeHtml, { omitMeta: true }) : ''
+  const xeSummarySectionHtml = xe ? buildXeSummarySectionHtml(xe, escapeHtml) : ''
   const debugSectionHtml = buildXDebugSection(reportRoot, escapeHtml)
   const abilityView = buildAbilityViewFromXe(xe)
   const abilityBarsHtml = abilityView
@@ -680,6 +682,8 @@ async function showReportModal(reportApiResponse = null) {
           }
           ${overviewHtml}
         </div>
+
+        ${xeSummarySectionHtml}
 
         ${debugSectionHtml}
 
@@ -1328,6 +1332,69 @@ body {
 }
 .report-x-debug-list li {
   margin-bottom: 6px;
+}
+.report-xe-summary {
+  border-top: 1px solid #eef2f5;
+  padding-top: 8px;
+}
+.report-xe-summary-source {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: #8e99a4;
+  line-height: 1.45;
+}
+.report-xe-summary-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #eef6ff;
+  color: #2980b9;
+  font-size: 11px;
+  font-weight: 600;
+}
+.report-xe-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.report-xe-summary-card {
+  margin: 0;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 10px;
+  border-left: 4px solid #3498db;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.report-xe-summary-h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2d3436;
+  letter-spacing: 0.02em;
+}
+.report-xe-summary-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #2d3436;
+}
+.report-xe-summary-body--text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.report-xe-kp-list {
+  margin: 0;
+  padding-left: 1.15em;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #2d3436;
+}
+.report-xe-kp-list li {
+  margin-bottom: 8px;
+}
+.report-xe-kp-list li:last-child {
+  margin-bottom: 0;
 }
 .report-x-dl {
   display: grid;
