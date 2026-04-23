@@ -84,8 +84,16 @@
           </div>
           <div class="input-row">
             <input type="text" id="chat-input" placeholder="输入你想对学生说的话…" autocomplete="off">
-            <button class="send-btn" id="send-btn">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            <button
+              class="send-btn"
+              id="send-btn"
+              type="button"
+              title="发送消息"
+              aria-label="发送消息"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
             </button>
           </div>
         </div>
