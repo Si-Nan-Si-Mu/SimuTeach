@@ -16,31 +16,31 @@ function requestTrainingReport() {
   emit('report')
 }
 
-/** 与左侧专项模拟 SideBar 中三项专项训练一致（id 便于工作流区分对象） */
+/** 与左侧专项模拟 SideBar 中三个人格一致（id 便于工作流区分对象） */
 const students = ref([
   {
     id: 'dazhi',
     name: '李大志',
-    personality: '学习动机激发（李大志）',
+    personality: '习得性无助',
     row: 0,
     col: 0,
-    avatar: '😔'
+    avatar: '/avatars/dazhi.png'
   },
   {
     id: 'yiming',
     name: '张一鸣',
-    personality: '课堂管理（张一鸣）',
+    personality: '调皮捣蛋',
     row: 0,
     col: 1,
-    avatar: '😎'
+    avatar: '/avatars/yiming.png'
   },
   {
     id: 'xiaorou',
     name: '林暖暖',
-    personality: '心理情绪沟通（林暖暖）',
+    personality: '乖巧敏感',
     row: 0,
     col: 2,
-    avatar: '🥺'
+    avatar: '/avatars/xiaorou.png'
   }
 ])
 
@@ -166,7 +166,7 @@ function enqueueSendTask(task) {
   void runSendQueue()
 }
 
-/** 三名学生初始情绪（与专项模拟一致，随课堂互动略作波动） */
+/** 三人格初始情绪（与专项模拟一致，随课堂互动略作波动） */
 const emotionByStudentId = ref({
   dazhi: { joy: 20, activation: 15, anxiety: 75 },
   yiming: { joy: 70, activation: 85, anxiety: 15 },
@@ -251,8 +251,7 @@ const classroomEvents = ref([
     ts: Date.now(),
     kind: 'system',
     title: '课堂就绪',
-    detail:
-      '三项专项训练场景已就位：学习动机激发（李大志）、课堂管理（张一鸣）、心理情绪沟通（林暖暖）。可选中单人对话或全班广播。'
+    detail: '三人格已就位：李大志、张一鸣、林暖暖。可选中单人对话或全班广播。'
   }
 ])
 
@@ -593,12 +592,12 @@ const seatStyle = (s) => ({
   gridColumn: s.col + 1
 })
 
-/** 学生 id → 铭牌配色（与专项模拟角色气质对应） */
-const personalityTone = (s) => {
-  const id = s && typeof s === 'object' ? s.id : ''
-  if (id === 'dazhi') return 'confused'
-  if (id === 'yiming') return 'distracted'
-  if (id === 'xiaorou') return 'focus'
+/** 人格标签 → 铭牌配色（与专项模拟角色气质对应） */
+const personalityTone = (personality) => {
+  const p = String(personality || '')
+  if (p.includes('无助')) return 'confused'
+  if (p.includes('调皮')) return 'distracted'
+  if (p.includes('敏感')) return 'focus'
   return 'neutral'
 }
 
@@ -662,7 +661,7 @@ const sendProactiveTick = ({ fromManual = false } = {}) => {
   enqueueSendTask(async () => {
     workflowStreamPreview.value = ''
     const randomStudent = pickRandomProactiveStudent()
-    // 主动轮询：每次随机选一名学生，并把 model 指向该学生
+    // 主动轮询：每次随机切换人格，并把 model 指向该人格
     lastReplyTargets.value = [randomStudent.id]
     setBubbleFor(lastReplyTargets.value, { text: '', streaming: true, visible: true })
     pushClassroomEvent(
@@ -747,8 +746,8 @@ onBeforeUnmount(() => {
       <section class="stage classroom-panel classroom-panel--chat">
       <header class="podium" aria-label="讲台">
         <div class="podium-left">
-          <div class="podium-title">🧑‍🏫 老师讲台</div>
-          <div class="podium-subtitle">虚拟座位表（专项模拟 · 三项专项训练三角布局）</div>
+          <div class="podium-title"><img src="/icons/podium.png" style="width: 40px; height: 40px; vertical-align: -6px; margin-right: 2px; object-fit: contain;" aria-hidden="true" /> 老师讲台</div>
+          <div class="podium-subtitle">虚拟座位表（专项模拟 · 三人格三角布局）</div>
         </div>
         <div class="podium-right">
           <span class="pill">{{
@@ -762,7 +761,7 @@ onBeforeUnmount(() => {
             :title="reportBusy ? '报告生成中，请稍候…' : '结束本节课并生成训练报告'"
             @click="requestTrainingReport"
           >
-            <span aria-hidden="true">📊</span> 结束 · 生成报告
+            <img src="/icons/report.png" style="width: 36px; height: 36px; vertical-align: -4px; margin-right: 2px; object-fit: contain;" aria-hidden="true" /> 结束 · 生成报告
           </button>
         </div>
       </header>
@@ -794,13 +793,19 @@ onBeforeUnmount(() => {
                 <div class="speech-tail" />
               </div>
 
-              <div class="student-avatar" aria-hidden="true">{{ s.avatar }}</div>
+              <img
+                class="student-avatar-img"
+                :class="{ 'student-avatar-img--dazhi': s.id === 'dazhi' }"
+                :src="s.avatar"
+                :alt="s.name"
+                aria-hidden="true"
+              />
             </div>
 
             <div class="student-desk" :class="{ selected: selectedStudentId === s.id }" aria-hidden="true">
               <div class="desk-nameplate desk-nameplate--stacked">
                 <div class="nameplate-name">{{ s.name }}</div>
-                <div class="nameplate-status" :data-tone="personalityTone(s)">
+                <div class="nameplate-status" :data-tone="personalityTone(s.personality)">
                   {{ s.personality }}
                 </div>
               </div>
@@ -809,96 +814,108 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 对话框：同步展示手动与主动轮询的学生发言 -->
-      <div class="classroom-dialog-feed" role="log" aria-label="课堂对话框">
-        <div v-if="!dialogFeedItems.length" class="dialog-feed-empty">暂无对话记录</div>
-        <div v-else class="dialog-feed-list">
-          <div
-            v-for="ev in dialogFeedItems"
-            :key="ev.id"
-            class="dialog-feed-item"
-            :data-kind="ev.kind"
-          >
-            <span class="dialog-feed-time">{{ formatEvtTime(ev.ts) }}</span>
-            <span class="dialog-feed-title">{{ ev.title }}</span>
-            <span v-if="ev.detail" class="dialog-feed-detail">{{ ev.detail }}</span>
+      <!-- 对话流与输入框卡片 -->
+      <div class="conversation-card">
+        <!-- 对话框：同步展示手动与主动轮询的学生发言 -->
+        <div class="classroom-dialog-feed" role="log" aria-label="课堂对话框">
+          <div v-if="!dialogFeedItems.length" class="dialog-feed-empty">暂无对话记录</div>
+          <div v-else class="dialog-feed-list">
+            <div
+              v-for="ev in dialogFeedItems"
+              :key="ev.id"
+              class="dialog-feed-item"
+              :data-kind="ev.kind"
+            >
+              <span class="dialog-feed-time">{{ formatEvtTime(ev.ts) }}</span>
+              <span class="dialog-feed-title">{{ ev.title }}</span>
+              <span v-if="ev.detail" class="dialog-feed-detail">{{ ev.detail }}</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <footer class="teacher-bar" aria-label="教师控制栏">
-        <div v-if="workflowStreamPreview" class="workflow-stream-preview" aria-live="polite">
-          <span class="workflow-stream-label">智能体生成中…</span>
-          <span class="workflow-stream-text">{{ workflowStreamPreview }}</span>
-        </div>
-        <div class="teacher-input-wrap">
-          <input
-            id="classroom-broadcast-input"
-            v-model="broadcastText"
-            class="teacher-input"
-            type="text"
-            name="classroom-broadcast"
-            autocomplete="off"
-            :aria-label="selectedStudent ? `对 ${selectedStudent.name} 说话` : '面向全班广播'"
-            :placeholder="selectedStudent ? `对 ${selectedStudent.name} 说...` : '输入要面向全班广播的内容…'"
-            @keydown.enter.prevent="onBroadcast()"
-          />
-          <button
-            class="broadcast-btn"
-            type="button"
-            @click="onBroadcast()"
-          >
-            {{
-              workflowBusy
-                ? `发送排队中（${queuedSendCount}）`
-                : queuedSendCount > 0
-                  ? `发送（队列 ${queuedSendCount}）`
-                  : '发送'
-            }}
-          </button>
-          <button
-            class="broadcast-btn broadcast-btn--class"
-            type="button"
-            @click="onBroadcastClass"
-          >
-            广播
-          </button>
-        </div>
-      </footer>
+        <footer class="teacher-bar" aria-label="教师控制栏">
+          <div v-if="workflowStreamPreview" class="workflow-stream-preview" aria-live="polite">
+            <span class="workflow-stream-label">智能体生成中…</span>
+            <span class="workflow-stream-text">{{ workflowStreamPreview }}</span>
+          </div>
+          <div class="teacher-input-wrap">
+            <input
+              id="classroom-broadcast-input"
+              v-model="broadcastText"
+              class="teacher-input"
+              type="text"
+              name="classroom-broadcast"
+              autocomplete="off"
+              :aria-label="selectedStudent ? `对 ${selectedStudent.name} 说话` : '面向全班广播'"
+              :placeholder="selectedStudent ? `对 ${selectedStudent.name} 说...` : '输入要面向全班广播的内容…'"
+              @keydown.enter.prevent="onBroadcast()"
+            />
+            <button
+              class="broadcast-btn"
+              type="button"
+              @click="onBroadcast()"
+            >
+              {{
+                workflowBusy
+                  ? `发送排队中（${queuedSendCount}）`
+                  : queuedSendCount > 0
+                    ? `发送（队列 ${queuedSendCount}）`
+                    : '发送'
+              }}
+            </button>
+            <button
+              class="broadcast-btn broadcast-btn--class"
+              type="button"
+              @click="onBroadcastClass"
+            >
+              广播
+            </button>
+          </div>
+        </footer>
+      </div>
       </section>
 
       <aside class="console classroom-panel classroom-panel--dash" aria-label="课堂控制台">
-      <div class="panel panel--emotion">
-        <div class="panel-title">课堂情绪看板</div>
-        <div class="panel-body emotion-panel-body">
-          <div class="emotion-avg-block">
-            <div class="emotion-avg-heading">📊 三名学生情绪均值</div>
-            <p class="emotion-avg-hint">以下为李大志、张一鸣、林暖暖三人当前愉悦度 / 激活度 / 焦虑度的算术平均（0–100）。</p>
+  <div class="panel panel--emotion">
+    <div class="panel-title">课堂情绪看板</div>
+    <div class="panel-body emotion-panel-body">
+      <div class="emotion-avg-block">
+        <div class="emotion-avg-heading">
+          <img src="/icons/emotion-avg.png" style="width: 36px; height: 36px; vertical-align: -2px; margin-right: 6px; object-fit: contain;" aria-hidden="true" /> 三人格情绪均值
+        </div>
+        <p class="emotion-avg-hint">以下为李大志、张一鸣、林暖暖三人当前愉悦度 / 激活度 / 焦虑度的算术平均（0–100）。</p>
+        
+        <div
+          v-for="dim in EMOTION_DIMS"
+          :key="dim.key"
+          class="emotion-bar-row"
+        >
+          <span class="emotion-bar-label">{{ dim.label }}</span>
+          <div class="emotion-bar-track">
             <div
-              v-for="dim in EMOTION_DIMS"
-              :key="dim.key"
-              class="emotion-bar-row"
-            >
-              <span class="emotion-bar-label">{{ dim.label }}</span>
-              <div class="emotion-bar-track">
-                <div
-                  class="emotion-bar-fill"
-                  :style="{
-                    width: Math.min(100, classAverageEmotion[dim.key] || 0) + '%',
-                    background: dim.color
-                  }"
-                />
-              </div>
-              <span class="emotion-bar-val">{{ Math.round(classAverageEmotion[dim.key] || 0) }}</span>
-            </div>
+              class="emotion-bar-fill"
+              :style="{
+                width: Math.min(100, classAverageEmotion[dim.key] || 0) + '%',
+                background: dim.color
+              }"
+            />
           </div>
+          <span class="emotion-bar-val">{{ Math.round(classAverageEmotion[dim.key] || 0) }}</span>
+        </div>
+        </div>
           <div class="emotion-per-student">
             <div
               v-for="row in emotionStudentRows"
               :key="row.id"
               class="emotion-student-row"
             >
-              <span class="emotion-student-avatar" aria-hidden="true">{{ row.avatar }}</span>
+              <img
+                class="emotion-student-avatar-img"
+                :class="{ 'emotion-student-avatar-img--dazhi': row.id === 'dazhi' }"
+                :src="row.avatar"
+                :alt="row.name"
+                aria-hidden="true"
+              />
               <div class="emotion-student-info">
                 <div class="emotion-student-name">{{ row.name }}</div>
                 <div class="emotion-student-mini">
@@ -951,7 +968,7 @@ onBeforeUnmount(() => {
             :title="reportBusy ? '报告生成中，请稍候…' : '结束本节课并生成训练报告'"
             @click="requestTrainingReport"
           >
-            <span aria-hidden="true">📊</span> 结束 · 生成报告
+            <img src="/icons/report.png" style="width: 36px; height: 36px; vertical-align: -4px; margin-right: 2px; object-fit: contain;" aria-hidden="true" /> 结束 · 生成报告
           </button>
           <p class="classroom-report-strip__hint">仅在课堂模拟内可用；专项模拟与文档分析侧栏不再提供此入口。</p>
         </div>
@@ -1001,7 +1018,7 @@ onBeforeUnmount(() => {
   width: 100vw;
   display: flex;
   overflow: hidden;
-  background: linear-gradient(180deg, #fbf6ea 0%, #f6efe1 60%, #f3ead8 100%);
+  background: #F4F6F9;
   color: #2d3436;
   /* 避免全局 :root 的 color-scheme: light dark 在系统深色模式下把原生 input 变成“暗色控件”，导致文字与背景对比度极差 */
   color-scheme: light;
@@ -1027,7 +1044,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   padding: 18px 18px 0;
   box-sizing: border-box;
-  background: #f4f1ea;
+  background: #F4F6F9;
 }
 
 .console {
@@ -1050,11 +1067,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #2a4b3c, #1e392a);
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  color: rgba(245, 245, 245, 0.95);
-  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5), 0 10px 26px rgba(45, 52, 54, 0.12);
+  border-radius: 8px;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  color: #374151;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .podium-title {
@@ -1065,7 +1082,7 @@ onBeforeUnmount(() => {
 .podium-subtitle {
   margin-top: 4px;
   font-size: 12px;
-  color: rgba(245, 245, 245, 0.78);
+  color: rgba(55, 65, 81, 0.7);
 }
 
 .pill {
@@ -1073,9 +1090,9 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 7px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: rgba(245, 245, 245, 0.92);
+  background: rgba(55, 65, 81, 0.08);
+  border: 1px solid rgba(55, 65, 81, 0.12);
+  color: rgba(55, 65, 81, 0.9);
   font-size: 12px;
 }
 
@@ -1140,14 +1157,25 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 
+.conversation-card {
+  background: #FFFFFF;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  padding: 24px;
+  margin: 0 6px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .classroom-dialog-feed {
   flex: 0 0 auto;
-  margin: 0 6px 10px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(45, 52, 54, 0.12);
-  box-shadow: 0 10px 18px rgba(45, 52, 54, 0.06);
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
   max-height: clamp(96px, 18vh, 190px);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
@@ -1504,12 +1532,10 @@ onBeforeUnmount(() => {
 }
 
 .teacher-bar {
-  position: sticky;
-  bottom: 0;
   flex: 0 0 auto;
-  padding: 12px 0 18px;
-  background: linear-gradient(180deg, rgba(246, 239, 225, 0) 0%, rgba(246, 239, 225, 0.85) 30%, rgba(246, 239, 225, 1) 100%);
-  backdrop-filter: blur(6px);
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .workflow-stream-preview {
@@ -2149,5 +2175,111 @@ onBeforeUnmount(() => {
     display: none;
   }
 }
+
+.student-avatar-img {
+  width: 68px;
+  height: 68px;
+  border-radius: 20px;
+  object-fit: cover;
+  object-position: center;
+  filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.12));
+  z-index: 1;
+}
+
+.student-avatar-img--dazhi,
+.emotion-student-avatar-img--dazhi {
+  object-position: 50% 25%;
+}
+
+.emotion-student-avatar-img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .student-avatar-img {
+    width: 78px;
+    height: 78px;
+  }
+}
+
+/* ... 上面是你原本的几百行 CSS，完全不要动它们 ... */
+
+@media (max-width: 768px) {
+  .student-avatar-img {
+    width: 78px;
+    height: 78px;
+  }
+}
+
+/* ===== V2 Override: 沉浸式现代课堂 (Modern Classroom) ===== */
+
+/* 1. 黑板隐喻：将顶部讲台变身“高级哑光黑板” */
+.podium {
+  background: #2C3A35 !important; /* 沉稳的高级墨绿色 */
+  border: none !important;
+  color: #E8F0ED !important;
+  box-shadow: 0 8px 24px rgba(44, 58, 53, 0.15) !important;
+}
+.podium-title { color: #FFFFFF !important; }
+.podium-subtitle { color: #A0B2AB !important; }
+.podium .pill {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #FFFFFF !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+/* 黑板上的按钮做成粉笔白半透明质感 */
+.classroom-report-btn {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+/* 2. 课桌隐喻：摒弃土气渐变，使用“北欧原木色”扁平设计 */
+.student-desk {
+  background: #FDFBF7 !important; /* 极浅的暖纸色/木底色 */
+  border: 1px solid #EAE3D9 !important;
+  border-bottom: 4px solid #C19A6B !important; /* 扁平的高级原木色底边 */
+  border-radius: 12px !important;
+  box-shadow: 0 8px 16px rgba(193, 154, 107, 0.08) !important;
+  transition: all 0.2s ease !important;
+}
+.student-desk::before, .student-desk::after { 
+  content: none !important; 
+}
+/* 选中学生时，课桌的原木色加深，并有轻微浮起感 */
+.student-seat:focus-visible .student-desk,
+.student-desk.selected {
+  border-color: #A67B5B !important;
+  border-bottom-color: #8B5A2B !important; 
+  box-shadow: 0 0 0 3px rgba(193, 154, 107, 0.25), 0 12px 24px rgba(193, 154, 107, 0.15) !important;
+  transform: translateY(-2px);
+}
+
+/* 3. 保留情绪进度条的莫兰迪语义色 (保持专业数据的克制感) */
+.emotion-bar-track { background: var(--app-bg-muted) !important; }
+.emotion-bar-fill { background: var(--app-color-primary) !important; }
+.emotion-avg-block .emotion-bar-row:nth-of-type(2) .emotion-bar-fill { background: var(--app-color-pleasure) !important; }
+.emotion-avg-block .emotion-bar-row:nth-of-type(3) .emotion-bar-fill { background: var(--app-color-primary) !important; }
+.emotion-avg-block .emotion-bar-row:nth-of-type(4) .emotion-bar-fill { background: var(--app-color-anxiety) !important; }
+
+/* 4. 右侧/下方常规操作按钮统一归回 B2B 主色 */
+.classroom-report-btn--panel, .broadcast-btn, .broadcast-btn--class {
+  background: var(--app-color-primary) !important;
+  border: 1px solid var(--app-color-primary) !important;
+  color: var(--app-bg-panel) !important;
+  box-shadow: none !important;
+}
+.classroom-report-btn--panel:hover:not(:disabled),
+.broadcast-btn:hover:not(:disabled),
+.broadcast-btn--class:hover:not(:disabled) {
+  filter: brightness(0.96) !important;
+}
+
 </style>
 

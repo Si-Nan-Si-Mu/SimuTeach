@@ -10,12 +10,12 @@ import {
   buildReportSpecialTrainingHtml,
   buildSuggestionsFromXe,
   buildTrainingOverviewHtml,
-  buildXeSummarySectionHtml,
   buildXDebugSection,
   extractXEvaluation,
   getCategoryScoresForChart,
   unwrapReportApiResponse
 } from './reportEvaluation.js'
+import { trainingFocusForStudentId, TRAINING_FOCUS_BY_STUDENT_ID } from './constants/specialTrainingFocus.js'
 
 const currentMode = ref('special')
 
@@ -31,13 +31,14 @@ const reportGenerationBusy = ref(false)
 const reportGenerationPercent = ref(8)
 
 const chatHeaderName = ref('😔 李大志')
-const chatHeaderType = ref('学习动机激发（李大志）')
+const chatHeaderType = ref(TRAINING_FOCUS_BY_STUDENT_ID.dazhi)
 
 const selectedStudent = ref({
   id: 'dazhi',
   name: '李大志',
-  personality: '学习动机激发（李大志）',
-  avatar: '😔',
+  trainingFocus: TRAINING_FOCUS_BY_STUDENT_ID.dazhi,
+  personality: '习得性无助型',
+  avatar: '/avatars/dazhi.png',
   color: '#e74c3c',
   bgGradient: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
   tagline: '"我觉得我不行……"',
@@ -275,10 +276,9 @@ const onStudentSelectedFull = (student) => {
 
   // 顺带更新标题气质 badge（如果你不想变，可以删掉这里）
   selectedStudent.value = next
-  chatHeaderType.value = next?.personality || chatHeaderType.value
+  chatHeaderType.value = next?.trainingFocus || trainingFocusForStudentId(next?.id) || next?.personality || chatHeaderType.value
   // 与原版顶栏一致：「头像emoji + 姓名」
-  if (next?.avatar && next?.name) chatHeaderName.value = `${next.avatar} ${next.name}`
-  else if (next?.name) chatHeaderName.value = next.name
+  if (next?.name) chatHeaderName.value = next.name
 
   sessionId.value = `sess_${Date.now()}_${next.id}`
 
@@ -298,13 +298,14 @@ function goToClassroomSimFromDocAnalysis() {
   mobileSidebarOpen.value = false
 }
 
-/** 与侧栏一致的三项专项训练，用于报告加载中的「专项训练」快捷跳转 */
+/** 与侧栏一致的三人格，用于报告加载中的「专项训练」快捷跳转 */
 const SPECIAL_TRAINING_REPORT_SHORTCUTS = [
   {
     id: 'dazhi',
     name: '李大志',
-    personality: '学习动机激发（李大志）',
-    avatar: '😔',
+    trainingFocus: TRAINING_FOCUS_BY_STUDENT_ID.dazhi,
+    personality: '习得性无助型',
+    avatar: '/avatars/dazhi.png',
     color: '#e74c3c',
     bgGradient: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
     tagline: '"我觉得我不行……"',
@@ -315,8 +316,9 @@ const SPECIAL_TRAINING_REPORT_SHORTCUTS = [
   {
     id: 'yiming',
     name: '张一鸣',
-    personality: '课堂管理（张一鸣）',
-    avatar: '😎',
+    trainingFocus: TRAINING_FOCUS_BY_STUDENT_ID.yiming,
+    personality: '调皮捣蛋',
+    avatar: '/avatars/yiming.png',
     color: '#3498db',
     bgGradient: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
     tagline: '"老师！我有个问题！"',
@@ -327,8 +329,9 @@ const SPECIAL_TRAINING_REPORT_SHORTCUTS = [
   {
     id: 'xiaorou',
     name: '林暖暖',
-    personality: '心理情绪沟通（林暖暖）',
-    avatar: '🥺',
+    trainingFocus: TRAINING_FOCUS_BY_STUDENT_ID.xiaorou,
+    personality: '乖巧敏感',
+    avatar: '/avatars/xiaorou.png',
     color: '#9b59b6',
     bgGradient: 'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)',
     tagline: '"老师，你是不是生气了……"',
@@ -641,16 +644,12 @@ async function showReportModal(reportApiResponse = null) {
       </div>
     </div>`
   const evalSectionHtml = xe ? buildEvaluationHtml(xe, escapeHtml, { omitMeta: true }) : ''
-  const xeSummarySectionHtml = xe ? buildXeSummarySectionHtml(xe, escapeHtml) : ''
   const debugSectionHtml = buildXDebugSection(reportRoot, escapeHtml)
   const abilityView = buildAbilityViewFromXe(xe)
   const abilityBarsHtml = abilityView
     ? renderXeCategoryBars(abilityView.items)
     : '<p class="report-ability-source">后端未返回可用的能力分类得分（x-evaluation.categories）。</p>'
   const specialTrainingHtml = xe ? buildReportSpecialTrainingHtml(xe, escapeHtml) : ''
-
-  const apiModel = reportRoot && typeof reportRoot.model === 'string' ? reportRoot.model : ''
-  const reportDisplayName = apiModel || character.name
 
   const existing = document.getElementById('report-modal')
   if (existing) existing.remove()
@@ -660,17 +659,14 @@ async function showReportModal(reportApiResponse = null) {
   modal.className = 'report-overlay'
 
   modal.innerHTML = `
-    <div class="report-container">
-      <div class="report-header" style="background: ${character.bgGradient}">
-        <button class="report-close" type="button" aria-label="关闭">✕</button>
-        <div class="report-title-area">
-          <span class="report-avatar">${character.avatar}</span>
-          <div>
-            <h2>📋 教学训练报告</h2>
-            <p>训练对象：${escapeHtml(reportDisplayName)}（${escapeHtml(character.personality)}）</p>
-          </div>
+    <div class="report-container report-container--app">
+      <header class="report-topbar">
+        <div class="report-topbar-inner">
+          <div class="report-topbar-spacer" aria-hidden="true"></div>
+          <h2 class="report-topbar-title">教学训练报告</h2>
+          <button class="report-close report-close--bar" type="button" aria-label="关闭">✕</button>
         </div>
-      </div>
+      </header>
 
       <div class="report-body">
         <div class="report-section">
@@ -682,8 +678,6 @@ async function showReportModal(reportApiResponse = null) {
           }
           ${overviewHtml}
         </div>
-
-        ${xeSummarySectionHtml}
 
         ${debugSectionHtml}
 
@@ -697,16 +691,20 @@ async function showReportModal(reportApiResponse = null) {
           <div class="scores-row">
             <div class="report-radar-wrap">
               <div class="report-chart-subtitle">雷达图（综合维度）</div>
-              ${
-                abilityView
-                  ? '<div id="report-radar" class="report-radar-canvas"></div>'
-                  : '<div class="report-ability-source" style="padding:12px;">后端缺少雷达数据</div>'
-              }
+              <div class="report-radar-plot">
+                ${
+                  abilityView
+                    ? '<div id="report-radar" class="report-radar-canvas"></div>'
+                    : '<div class="report-ability-source" style="padding:12px;">后端缺少雷达数据</div>'
+                }
+              </div>
             </div>
             <div class="report-chart-divider" aria-hidden="true"></div>
             <div class="score-bars">
               <div class="report-chart-subtitle">能力条形图（分类得分）</div>
-              ${abilityBarsHtml}
+              <div class="score-bars-plot">
+                ${abilityBarsHtml}
+              </div>
             </div>
           </div>
         </div>
@@ -1219,6 +1217,56 @@ watch(
 <style>
 @import '../vendor/front/css/style.css';
 
+:root {
+  /* Brand / Primary */
+  --app-color-primary: #2f5d7c;
+  --app-color-primary-hover: #284f6a;
+  --app-color-primary-active: #213f55;
+  --app-color-primary-soft: #edf3f7;
+  --app-color-primary-border: #c6d4de;
+
+  /* Emotion semantics */
+  --app-color-pleasure: #728b7a;
+  --app-color-pleasure-soft: #eef3ef;
+  --app-color-pleasure-border: #c8d4cb;
+  --app-color-pleasure-text: #4f6656;
+
+  --app-color-anxiety: #a06f67;
+  --app-color-anxiety-soft: #f6efed;
+  --app-color-anxiety-border: #dcc5c0;
+  --app-color-anxiety-text: #7d5751;
+
+  --app-color-neutral: #8a96a3;
+  --app-color-neutral-soft: #f1f3f5;
+  --app-color-neutral-border: #d4dbe1;
+  --app-color-neutral-text: #66717d;
+
+  /* Gray system */
+  --app-bg-page: #f4f6f8;
+  --app-bg-panel: #ffffff;
+  --app-bg-subtle: #eef1f4;
+  --app-bg-muted: #e7ebef;
+
+  --app-border-default: #d7dde3;
+  --app-border-strong: #c4ccd4;
+
+  --app-text-primary: #1f2a37;
+  --app-text-secondary: #4b5563;
+  --app-text-tertiary: #7b8794;
+  --app-text-disabled: #9aa4af;
+
+  /* Optional shared aliases for gradual replacement */
+  --app-shadow-color: rgba(31, 42, 55, 0.12);
+  --app-overlay-color: rgba(31, 42, 55, 0.18);
+
+  --text: var(--app-text-secondary);
+  --text-h: var(--app-text-primary);
+  --bg: var(--app-bg-panel);
+  --border: var(--app-border-default);
+  --accent: var(--app-color-primary);
+  --accent-bg: var(--app-color-primary-soft);
+}
+
 html,
 body {
   height: 100%;
@@ -1246,6 +1294,104 @@ body {
 
 .app-container > .chat-main {
   position: relative;
+}
+
+/* 侧栏在报告/遮罩之上，并允许收缩按钮外凸（负 right）显示；避免主区盖住按钮延伸部分 */
+.app-container .sidebar {
+  position: relative;
+  z-index: 30;
+  overflow: visible;
+}
+.app-container > .chat-main,
+.app-container .training-shell {
+  z-index: 1;
+  position: relative;
+}
+
+/* 桌面：遮罩从「侧栏右缘 + 收缩钮外凸 18px」起算，避免盖住侧栏外凸的收缩钮（--app-sidebar-outer 由 SideBar 同步） */
+@media (min-width: 769px) {
+  .report-overlay {
+    left: var(--app-sidebar-outer, 278px);
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    box-sizing: border-box;
+  }
+}
+
+/* 报告弹窗：与当前应用主色/背景统一；顶部条 sticky，关闭常显 */
+.report-container.report-container--app {
+  border-radius: 16px;
+  border: 1px solid var(--app-border-default, #d7dde3);
+  box-shadow: 0 16px 48px var(--app-shadow-color, rgba(31, 42, 55, 0.12));
+  overflow-x: hidden;
+}
+.report-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--app-bg-panel, #ffffff);
+  border-bottom: 1px solid var(--app-border-default, #d7dde3);
+  box-shadow: 0 1px 0 rgba(31, 42, 55, 0.05);
+}
+.report-topbar-inner {
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  align-items: center;
+  padding: 8px 12px;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+.report-topbar-spacer {
+  width: 40px;
+  min-width: 40px;
+  height: 1px;
+  pointer-events: none;
+}
+.report-topbar-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--app-text-primary, #1f2a37) !important;
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  min-width: 0;
+  text-align: center;
+}
+.report-close--bar,
+.report-topbar .report-close.report-close--bar {
+  position: static !important;
+  top: auto;
+  right: auto;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--app-bg-subtle, #eef1f4) !important;
+  color: var(--app-text-secondary, #4b5563) !important;
+  border: 1px solid var(--app-border-default, #d7dde3) !important;
+  font-size: 18px;
+  line-height: 1;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+  transform: none !important;
+}
+.report-close--bar:hover,
+.report-topbar .report-close.report-close--bar:hover {
+  background: var(--app-color-primary-soft, #edf3f7) !important;
+  color: var(--app-color-primary, #2f5d7c) !important;
+  border-color: var(--app-color-primary-border, #c6d4de) !important;
+  transform: none !important;
+}
+.report-container.report-container--app .report-body {
+  padding-top: 4px;
 }
 
 /* 报告弹窗：x-evaluation 可视化 */
@@ -1292,6 +1438,10 @@ body {
   color: #636e72;
   line-height: 1.45;
 }
+.report-radar-plot,
+.score-bars-plot {
+  min-width: 0;
+}
 .report-radar-canvas {
   width: 100%;
   height: 320px;
@@ -1332,69 +1482,6 @@ body {
 }
 .report-x-debug-list li {
   margin-bottom: 6px;
-}
-.report-xe-summary {
-  border-top: 1px solid #eef2f5;
-  padding-top: 8px;
-}
-.report-xe-summary-source {
-  margin: 0 0 14px;
-  font-size: 12px;
-  color: #8e99a4;
-  line-height: 1.45;
-}
-.report-xe-summary-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: #eef6ff;
-  color: #2980b9;
-  font-size: 11px;
-  font-weight: 600;
-}
-.report-xe-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-.report-xe-summary-card {
-  margin: 0;
-  padding: 14px 16px;
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border-radius: 10px;
-  border-left: 4px solid #3498db;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-}
-.report-xe-summary-h4 {
-  margin: 0 0 10px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #2d3436;
-  letter-spacing: 0.02em;
-}
-.report-xe-summary-body {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.65;
-  color: #2d3436;
-}
-.report-xe-summary-body--text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.report-xe-kp-list {
-  margin: 0;
-  padding-left: 1.15em;
-  font-size: 13px;
-  line-height: 1.65;
-  color: #2d3436;
-}
-.report-xe-kp-list li {
-  margin-bottom: 8px;
-}
-.report-xe-kp-list li:last-child {
-  margin-bottom: 0;
 }
 .report-x-dl {
   display: grid;
@@ -1533,8 +1620,9 @@ body {
   gap: 20px;
   padding: 32px 40px;
   border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  background: var(--app-bg-panel, #fff);
+  border: 1px solid var(--app-border-default, #d7dde3);
+  box-shadow: 0 16px 48px var(--app-shadow-color, rgba(31, 42, 55, 0.12));
   max-width: min(360px, 100%);
 }
 
@@ -1661,7 +1749,7 @@ body {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #2d3436;
+  color: var(--app-text-primary, #1f2a37);
   text-align: center;
   line-height: 1.45;
 }
@@ -1687,19 +1775,32 @@ body {
 }
 
 @media (min-width: 769px) {
+  /* 等宽两列 + 同高图区，雷达与条形图上下缘对齐、视觉更均衡 */
   .scores-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px 24px;
     align-items: stretch;
-    gap: 20px;
   }
-  .report-radar-wrap {
-    flex: 1.1;
-    min-width: 420px;
-  }
+  .report-radar-wrap,
   .score-bars {
-    flex: 1;
+    min-width: 0;
+  }
+  .report-radar-plot,
+  .score-bars-plot {
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .report-radar-plot {
+    align-items: center;
+  }
+  .score-bars-plot {
+    gap: 12px;
   }
   .report-radar-canvas {
-    height: 430px;
+    height: 400px;
   }
   .report-x-chart {
     height: 360px;
@@ -1716,11 +1817,18 @@ body {
   .report-radar-wrap {
     min-height: 0;
   }
+  .report-radar-plot,
+  .score-bars-plot {
+    min-height: 0;
+  }
   .report-radar-canvas {
     height: 390px;
   }
   .score-bars {
-    padding-top: 8px;
+    padding-top: 0;
+  }
+  .score-bars-plot {
+    gap: 12px;
   }
   .report-chart-divider {
     display: block;

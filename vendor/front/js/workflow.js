@@ -1072,7 +1072,7 @@ const WorkflowClient = {
 
   /**
    * 人格切换：仅向工作流发送 model，不在主对话框里展示
-   * - modelName 使用学生姓名中文，如「李大志」「张一鸣」
+   * - modelName 使用中文，如「习得性无助型」「注意力分散型」
    */
   async sendModelSwitch(sessionId, modelName) {
     const url = WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint;

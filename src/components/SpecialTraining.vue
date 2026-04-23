@@ -5,7 +5,7 @@ import EmotionPanel from './EmotionPanel.vue'
 
 const props = defineProps({
   headerName: { type: String, default: '😔 李大志' },
-  headerType: { type: String, default: '学习动机激发（李大志）' },
+  headerType: { type: String, default: '习得性无助型' },
   currentEmotion: { type: Object, default: null },
   student: { type: Object, default: null }
 })
@@ -61,7 +61,10 @@ defineExpose({
           @send="(payload) => emit('send', payload)"
         />
       </div>
-      <div class="training-panel training-panel--dash">
+      <div 
+        class="training-panel training-panel--dash" 
+        style="background-color: #F4F6F9 !important; border-left: none !important;"
+      >
         <EmotionPanel
           ref="emotionPanelRef"
           :emotion="props.currentEmotion"

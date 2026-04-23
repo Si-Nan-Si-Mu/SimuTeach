@@ -49,57 +49,139 @@ function clamp100(v) {
   return Math.max(0, Math.min(100, n))
 }
 
+/** 折线图图例：整体水平居中、项间距一致、与色块行高统一（ECharts 内置布局） */
+const lineChartLegend = {
+  type: 'plain',
+  orient: 'horizontal',
+  left: 'center',
+  right: 'auto',
+  top: 'auto',
+  bottom: 0,
+  padding: [0, 0, 0, 0],
+  // 与 series.name 一一对应，保证三项样式同源
+  data: [
+    { name: '愉悦度' },
+    { name: '激活度' },
+    { name: '焦虑度' }
+  ],
+  itemGap: 20,
+  itemWidth: 20,
+  itemHeight: 5,
+  icon: 'roundRect',
+  itemStyle: {
+    borderWidth: 0
+  },
+  textStyle: {
+    color: '#8e99a4',
+    fontSize: 11,
+    lineHeight: 20,
+    fontWeight: 500
+  }
+}
+
 // 折线图 option（smooth + 网格辅助线）
 function getLineOption() {
   const ec = window.echarts
   return {
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(30,30,50,0.85)',
-      borderColor: 'transparent',
-      textStyle: { color: '#fff', fontSize: 12 }
+      triggerOn: 'mousemove|click',
+      show: true,
+      // 挂到 body，避免被 .dashboard / 卡片 overflow 裁掉导致「悬停全看不到」
+      confine: false,
+      appendToBody: true,
+      className: 'ep-linechart-tooltip',
+      backgroundColor: 'rgba(30,30,50,0.92)',
+      borderColor: 'rgba(255,255,255,0.12)',
+      borderWidth: 1,
+      textStyle: { color: '#fff', fontSize: 12 },
+      extraCssText: 'border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,0.2);z-index:20000;',
+      axisPointer: {
+        type: 'line',
+        z: 1,
+        lineStyle: { color: 'rgba(99, 102, 241, 0.45)', width: 1, type: 'dashed' }
+      },
+      formatter(params) {
+        if (params == null) return '暂无数据'
+        const list = Array.isArray(params) ? params : [params]
+        if (!list.length) return '暂无数据'
+        const p0 = list[0]
+        const title = String(
+          p0.axisValueLabel ?? p0.axisValue ?? p0.name ?? ''
+        )
+        const head = title
+          ? `<div style="font-weight:600;margin-bottom:6px;opacity:0.95;">${title}</div>`
+          : ''
+        const body = list
+          .map((p) => {
+            const raw = p.value != null && p.value !== '' ? p.value : p.data
+            const n = Number(raw)
+            const val = raw == null || raw === '' || Number.isNaN(n) ? '—' : Math.round(n)
+            const m = p.marker != null && p.marker !== '' ? p.marker : '●'
+            const sn = p.seriesName != null && p.seriesName !== '' ? p.seriesName : '—'
+            return `${m} ${sn}：<b>${val}</b>`
+          })
+          .join('<br/>')
+        return head + body
+      }
     },
-    legend: {
-      data: ['愉悦度', '激活度', '焦虑度'],
-      bottom: 0,
-      textStyle: { color: '#8e99a4', fontSize: 11 },
-      itemWidth: 12,
-      itemHeight: 8
-    },
+    legend: { ...lineChartLegend },
     grid: {
-      top: 10,
-      right: 15,
-      bottom: 35,
-      left: 40,
+      top: 16,
+      right: 10,
+      bottom: 38,
+      left: 32,
       containLabel: true
     },
     xAxis: {
       type: 'category',
       data: [],
-      axisLine: { lineStyle: { color: '#dfe6e9' } },
+      axisLine: { lineStyle: { color: '#E5E7EB' } },
       axisLabel: { color: '#8e99a4', fontSize: 10 },
       boundaryGap: false
     },
     yAxis: {
       type: 'value',
-      min: 0,
-      max: 100,
-      splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } },
+      scale: true,
+      min: (v) => {
+        const a = v.min
+        const b = v.max
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return 0
+        if (b - a < 0.5) return Math.max(0, a - 14)
+        return Math.max(0, a - 12)
+      },
+      max: (v) => {
+        const a = v.min
+        const b = v.max
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return 100
+        if (b - a < 0.5) return Math.min(100, b + 14)
+        return Math.min(100, b + 12)
+      },
+      splitLine: { lineStyle: { color: '#F3F4F6', type: 'dashed' } },
       axisLabel: { color: '#8e99a4', fontSize: 10 }
     },
     series: [
       {
         name: '愉悦度',
         type: 'line',
-        smooth: true,
+        smooth: 0.45,
         symbol: 'circle',
-        symbolSize: 6,
-        lineStyle: { width: 2.5, color: '#2ecc71' },
-        itemStyle: { color: '#2ecc71' },
+        symbolSize: 4,
+        lineStyle: { 
+          width: 3, 
+          color: '#34D399',
+          shadowBlur: 8,
+          shadowColor: 'rgba(52, 211, 153, 0.35)'
+        },
+        itemStyle: { 
+          color: '#34D399',
+          borderColor: '#fff',
+          borderWidth: 1
+        },
         areaStyle: {
           color: new ec.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(46,204,113,0.25)' },
-            { offset: 1, color: 'rgba(46,204,113,0.02)' }
+            { offset: 0, color: 'rgba(52,211,153,0.25)' },
+            { offset: 1, color: 'rgba(52,211,153,0.02)' }
           ])
         },
         data: []
@@ -107,15 +189,24 @@ function getLineOption() {
       {
         name: '激活度',
         type: 'line',
-        smooth: true,
-        symbol: 'diamond',
-        symbolSize: 6,
-        lineStyle: { width: 2.5, color: '#3498db' },
-        itemStyle: { color: '#3498db' },
+        smooth: 0.45,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { 
+          width: 3, 
+          color: '#60A5FA',
+          shadowBlur: 8,
+          shadowColor: 'rgba(96, 165, 250, 0.35)'
+        },
+        itemStyle: { 
+          color: '#60A5FA',
+          borderColor: '#fff',
+          borderWidth: 1
+        },
         areaStyle: {
           color: new ec.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(52,152,219,0.25)' },
-            { offset: 1, color: 'rgba(52,152,219,0.02)' }
+            { offset: 0, color: 'rgba(96,165,250,0.25)' },
+            { offset: 1, color: 'rgba(96,165,250,0.02)' }
           ])
         },
         data: []
@@ -123,15 +214,15 @@ function getLineOption() {
       {
         name: '焦虑度',
         type: 'line',
-        smooth: true,
+        smooth: 0.45,
         symbol: 'triangle',
         symbolSize: 6,
-        lineStyle: { width: 2.5, color: '#e74c3c' },
-        itemStyle: { color: '#e74c3c' },
+        lineStyle: { width: 2.5, color: '#F87171' },
+        itemStyle: { color: '#F87171' },
         areaStyle: {
           color: new ec.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(231,76,60,0.25)' },
-            { offset: 1, color: 'rgba(231,76,60,0.02)' }
+            { offset: 0, color: 'rgba(248,113,113,0.25)' },
+            { offset: 1, color: 'rgba(248,113,113,0.02)' }
           ])
         },
         data: []
@@ -155,7 +246,10 @@ function updateLineSeries() {
       { data: [...lineHistory.joy] },
       { data: [...lineHistory.activation] },
       { data: [...lineHistory.anxiety] }
-    ]
+    ],
+    // 合并更新后仍保持：悬浮、图例布局
+    tooltip: { show: true, confine: false, appendToBody: true },
+    legend: { ...lineChartLegend }
   })
 }
 
@@ -203,13 +297,28 @@ function getRadarOption(echarts, character) {
   const { traitLabels, traits, name, color } = character
   return {
     radar: {
+      center: ['50%', '50%'],
+      // 在卡片内占更大比例，压掉四周留白（需与容器 min-height 配合避免裁字）
+      radius: '70%',
+      nameGap: 4,
       indicator: traitLabels.map((n) => ({ name: n, max: 100 })),
       shape: 'polygon',
       splitNumber: 4,
-      axisName: { color: '#636e72', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#dfe6e9' } },
-      splitArea: { areaStyle: { color: ['rgba(255,255,255,0)', 'rgba(200,200,200,0.05)'] } },
-      axisLine: { lineStyle: { color: '#dfe6e9' } }
+      axisName: { 
+        color: '#1f2a37',
+        fontSize: 12,
+        lineHeight: 16,
+        fontWeight: 600,
+        padding: [2, 1, 2, 1]
+      },
+      splitLine: { 
+        lineStyle: { 
+          color: '#E5E7EB', 
+          width: 1 
+        } 
+      },
+      splitArea: { areaStyle: { color: ['rgba(255,255,255,0)', 'rgba(255,255,255,0)'] } },
+      axisLine: { lineStyle: { color: '#E5E7EB' } }
     },
     series: [
       {
@@ -218,11 +327,21 @@ function getRadarOption(echarts, character) {
           {
             value: [traits.confidence, traits.expressiveness, traits.anxiety, traits.motivation, traits.socialSkill],
             name,
-            lineStyle: { color, width: 2 },
-            areaStyle: { color: color + '30' },
-            itemStyle: { color },
+            lineStyle: { 
+              color: '#4A90E2', 
+              width: 2.5 
+            },
+            areaStyle: { 
+              color: 'rgba(74, 144, 226, 0.16)' 
+            },
+            itemStyle: { 
+              color: '#4A90E2',
+              borderColor: '#4A90E2',
+              borderWidth: 2
+            },
             symbol: 'circle',
-            symbolSize: 5
+            symbolSize: 6,
+            symbolRotate: 0
           }
         ],
         animationDuration: 800,
@@ -235,19 +354,19 @@ function getRadarOption(echarts, character) {
 const TRAITS_BY_STUDENT_ID = {
   dazhi: {
     name: '李大志',
-    color: '#e74c3c',
+    color: '#F87171',
     traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
     traits: { confidence: 15, expressiveness: 25, anxiety: 85, motivation: 20, socialSkill: 30 }
   },
   yiming: {
     name: '张一鸣',
-    color: '#3498db',
+    color: '#60A5FA',
     traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
     traits: { confidence: 80, expressiveness: 90, anxiety: 20, motivation: 65, socialSkill: 85 }
   },
   xiaorou: {
     name: '林暖暖',
-    color: '#9b59b6',
+    color: '#A78BFA',
     traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
     traits: { confidence: 35, expressiveness: 55, anxiety: 70, motivation: 50, socialSkill: 60 }
   }
@@ -279,27 +398,27 @@ function updateRadarChart(student) {
   const option = character ? getRadarOption(echarts, character) : null
   if (!option) return
   radarChart.value.setOption(option, true)
+  nextTick(() => radarChart.value?.resize())
 }
 
 // =====================
 // 情绪条（右侧当前状态）
 // =====================
 const EMOTION_LABELS = {
-  joy: { name: '愉悦度', color: '#2ecc71', icon: '😊' },
-  activation: { name: '激活度', color: '#3498db', icon: '⚡' },
-  anxiety: { name: '焦虑度', color: '#e74c3c', icon: '😰' }
+  joy: { name: '愉悦度', color: '#34D399', icon: '😊' },
+  activation: { name: '激活度', color: '#60A5FA', icon: '⚡' },
+  anxiety: { name: '焦虑度', color: '#F87171', icon: '😰' }
 }
 
 const STATUS_THRESHOLDS = [
-  { condition: (e) => e.anxiety > 80, label: '😱 极度焦虑', color: '#c0392b' },
-  { condition: (e) => e.anxiety > 60, label: '😰 有点紧张', color: '#e74c3c' },
-  { condition: (e) => e.joy > 70 && e.anxiety < 30, label: '🌟 深受鼓舞', color: '#27ae60' },
-  { condition: (e) => e.joy > 50, label: '😊 心情不错', color: '#2ecc71' },
-  { condition: (e) => e.activation > 70, label: '🔥 非常活跃', color: '#e67e22' },
-  { condition: (e) => e.activation < 20, label: '😴 昏昏欲睡', color: '#95a5a6' },
-  { condition: () => true, label: '😐 状态一般', color: '#7f8c8d' }
+  { condition: (e) => e.anxiety > 80, label: '极度焦虑', color: '#EF4444', icon: '/icons/extreme-anxiety.png' },
+  { condition: (e) => e.anxiety > 60, label: '有点紧张', color: '#F87171', icon: '/icons/anxiety2.png' },
+  { condition: (e) => e.joy > 70 && e.anxiety < 30, label: '深受鼓舞', color: '#10B981', icon: '/icons/inspired.png' },
+  { condition: (e) => e.joy > 50, label: '心情不错', color: '#34D399', icon: '/icons/joy2.png' },
+  { condition: (e) => e.activation > 70, label: '非常活跃', color: '#F59E0B', icon: '/icons/activation.png' },
+  { condition: (e) => e.activation < 20, label: '昏昏欲睡', color: '#9CA3AF', icon: '/icons/sleepy.png' },
+  { condition: () => true, label: '状态一般', color: '#6B7280', icon: '/icons/natural.png' }
 ]
-
 const status = computed(() => {
   const e = emotionState.value
   for (const t of STATUS_THRESHOLDS) {
@@ -310,8 +429,8 @@ const status = computed(() => {
 
 function getBarGradient(key, val) {
   const baseColor = EMOTION_LABELS[key].color
-  if (key === 'anxiety' && val > 70) return 'linear-gradient(90deg, #e74c3c, #c0392b)'
-  if (key === 'joy' && val > 60) return 'linear-gradient(90deg, #2ecc71, #27ae60)'
+  if (key === 'anxiety' && val > 70) return 'linear-gradient(90deg, #F87171, #EF4444)'
+  if (key === 'joy' && val > 60) return 'linear-gradient(90deg, #34D399, #10B981)'
   return `linear-gradient(90deg, ${baseColor}aa, ${baseColor})`
 }
 
@@ -332,11 +451,11 @@ const pathTriggers = ['鼓励', '安抚', '互动', '提问', '批评']
 // 进度条颜色映射：模板中会用到 triggerColors[a.trigger]
 // 颜色可按“期望/推荐路径”语义自行调整
 const triggerColors = {
-  鼓励: '#2ecc71',
-  安抚: '#3498db',
-  互动: '#9b59b6',
-  提问: '#f39c12',
-  批评: '#e74c3c'
+  鼓励: '#34D399',
+  安抚: '#60A5FA',
+  互动: '#A78BFA',
+  提问: '#FBBF24',
+  批评: '#F87171'
 }
 
 // 期待/状态映射（来自旧版 PATH_PROFILES）
@@ -616,141 +735,254 @@ onBeforeUnmount(() => {
 
 <template>
   <aside class="dashboard">
-    <div class="dash-header">
-      <h2>📊 实时情绪监测</h2>
-    </div>
-
-    <div class="dash-section">
-      <div class="dash-section-title">当前状态</div>
-      <div class="status-badge-wrap">
-        <span
-          id="emotion-status"
-          class="status-badge"
-          :style="{
-            background: status.color + '18',
-            color: status.color,
-            borderColor: status.color + '40'
-          }"
-        >
-          {{ status.label }}
-        </span>
+    <!-- 外层背景与 header -->
+    <div class="dashboard-inner">
+        <div class="dash-header">
+        <h2 class="dash-header-title">
+          <img src="/icons/emotion-monitor.png" class="dash-header-icon" alt="" />
+          实时情绪监测
+        </h2>
       </div>
-    </div>
 
-    <div class="dash-section">
-      <div class="dash-section-title">情绪指标</div>
-      <div class="emotion-bars">
-        <div class="emo-bar-item">
-          <div class="emo-bar-label">
-            <span>{{ EMOTION_LABELS.joy.icon }} 愉悦度</span>
-            <span id="val-joy" class="emo-bar-val">{{ Math.round(clamp100(emotionState.joy)) }}</span>
-          </div>
-          <div class="emo-bar-track">
-            <div
-              id="bar-joy"
-              class="emo-bar-fill"
-              :style="{
-                width: clamp100(emotionState.joy) + '%',
-                background: getBarGradient('joy', clamp100(emotionState.joy))
-              }"
-            ></div>
-          </div>
+
+      <!-- 卡片 1：当前状态 + 情绪指标 -->
+      <div class="ep-card">
+        <div class="ep-card-title">当前状态</div>
+        <div class="status-badge-wrap">
+          <span
+            id="emotion-status"
+            class="status-badge"
+            :style="{
+              background: status.color + '18',
+              color: status.color,
+              borderColor: status.color + '40'
+            }"
+          >
+            <img v-if="status.icon" :src="status.icon" class="status-icon" alt="" />
+            <span class="status-badge-text">{{ status.label }}</span>
+          </span>
         </div>
 
-        <div class="emo-bar-item">
-          <div class="emo-bar-label">
-            <span>{{ EMOTION_LABELS.activation.icon }} 激活度</span>
-            <span id="val-activation" class="emo-bar-val">{{
-              Math.round(clamp100(emotionState.activation))
-            }}</span>
-          </div>
-          <div class="emo-bar-track">
-            <div
-              id="bar-activation"
-              class="emo-bar-fill"
-              :style="{
-                width: clamp100(emotionState.activation) + '%',
-                background: getBarGradient('activation', clamp100(emotionState.activation))
-              }"
-            ></div>
-          </div>
-        </div>
-
-        <div class="emo-bar-item">
-          <div class="emo-bar-label">
-            <span>{{ EMOTION_LABELS.anxiety.icon }} 焦虑度</span>
-            <span id="val-anxiety" class="emo-bar-val">{{ Math.round(clamp100(emotionState.anxiety)) }}</span>
-          </div>
-          <div class="emo-bar-track">
-            <div
-              id="bar-anxiety"
-              class="emo-bar-fill"
-              :style="{
-                width: clamp100(emotionState.anxiety) + '%',
-                background: getBarGradient('anxiety', clamp100(emotionState.anxiety))
-              }"
-            ></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 与原版 index.html 顺序一致：路径分析 → 雷达 → 折线 -->
-    <div class="dash-section">
-      <div class="dash-section-title">🧭 个性化路径分析</div>
-
-      <div id="path-compare" class="path-compare">
-        <div v-for="a in pathAnalysisData.actions" :key="a.trigger" class="path-bar-item">
-          <div class="path-action-row">
-            <div class="path-action-name">{{ a.actionName }}</div>
-            <span
-              class="path-label-tag"
-              :class="statusTextToCssClass(a.statusText)"
-            >
-              {{ a.statusText }}
-            </span>
-
-            <div class="path-dual-track path-dual-track-flex">
+        <div class="ep-card-title mt-4">情绪指标</div>
+        <div class="emotion-bars">
+          <div class="emo-bar-item">
+            <div class="emo-bar-label">
+              <span class="emo-name-wrap">
+                <img src="/icons/joy.png" class="emo-bar-icon" alt="" />
+                <span>愉悦度</span>
+              </span>
+              <span id="val-joy" class="emo-bar-val">{{ Math.round(clamp100(emotionState.joy)) }}</span>
+            </div>
+            <div class="emo-bar-track">
               <div
-                class="path-bar-ideal"
+                id="bar-joy"
+                class="emo-bar-fill"
                 :style="{
-                  width: a.expectedPct + '%',
-                  background: triggerColors[a.trigger]
-                }"
-              ></div>
-              <div
-                class="path-bar-actual"
-                :style="{
-                  width: a.actualPct + '%',
-                  background: triggerColors[a.trigger]
+                  width: clamp100(emotionState.joy) + '%',
+                  background: getBarGradient('joy', clamp100(emotionState.joy))
                 }"
               ></div>
             </div>
           </div>
 
-          <div class="path-bar-labels">
-            <span>期待 {{ a.expectedPct }}%</span>
-            <span>实际 {{ a.actualPct }}%</span>
+          <div class="emo-bar-item">
+            <div class="emo-bar-label">
+              <span class="emo-name-wrap">
+                <img src="/icons/activation.png" class="emo-bar-icon" alt="" />
+                <span>激活度</span>
+              </span>
+              <span id="val-activation" class="emo-bar-val">{{
+                Math.round(clamp100(emotionState.activation))
+              }}</span>
+            </div>
+            <div class="emo-bar-track">
+              <div
+                id="bar-activation"
+                class="emo-bar-fill"
+                :style="{
+                  width: clamp100(emotionState.activation) + '%',
+                  background: getBarGradient('activation', clamp100(emotionState.activation))
+                }"
+              ></div>
+            </div>
+          </div>
+
+          <div class="emo-bar-item">
+            <div class="emo-bar-label">
+              <span class="emo-name-wrap">
+                <img src="/icons/anxiety.png" class="emo-bar-icon" alt="" />
+                <span>焦虑度</span>
+              </span>
+              <span id="val-anxiety" class="emo-bar-val">{{ Math.round(clamp100(emotionState.anxiety)) }}</span>
+            </div>
+            <div class="emo-bar-track">
+              <div
+                id="bar-anxiety"
+                class="emo-bar-fill"
+                :style="{
+                  width: clamp100(emotionState.anxiety) + '%',
+                  background: getBarGradient('anxiety', clamp100(emotionState.anxiety))
+                }"
+              ></div>
+            </div>
           </div>
         </div>
       </div>
-      <div id="path-warning-area" class="path-warning-area"></div>
-    </div>
 
-    <div class="dash-section">
-      <div class="dash-section-title">五维人格画像</div>
-      <div id="personality-radar" ref="radarEl" style="width: 100%; height: 200px;"></div>
-    </div>
+      <!-- 卡片 2：个性化路径分析 -->
+      <div class="ep-card">
+        <div class="ep-card-title ep-card-title--with-icon ep-card-title--center">
+          <img src="/icons/path-analysis.png" class="ep-title-icon" alt="" />
+          个性化路径分析
+        </div>
+        <div id="path-compare" class="path-compare">
+          <div v-for="a in pathAnalysisData.actions" :key="a.trigger" class="path-bar-item">
+            <div class="path-action-row">
+              <div class="path-action-name">{{ a.actionName }}</div>
+              <span
+                class="path-label-tag"
+                :class="statusTextToCssClass(a.statusText)"
+              >
+                {{ a.statusText }}
+              </span>
 
-    <div class="dash-section">
-      <div class="dash-section-title">情绪波动曲线</div>
-      <div id="emotion-chart" ref="lineEl" style="width: 100%; height: 200px;"></div>
+              <div class="path-dual-track path-dual-track-flex">
+                <div
+                  class="path-bar-ideal"
+                  :style="{
+                    width: a.expectedPct + '%',
+                    background: triggerColors[a.trigger]
+                  }"
+                ></div>
+                <div
+                  class="path-bar-actual"
+                  :style="{
+                    width: a.actualPct + '%',
+                    background: triggerColors[a.trigger]
+                  }"
+                ></div>
+              </div>
+            </div>
+
+            <div class="path-bar-labels">
+              <span>期待 {{ a.expectedPct }}%</span>
+              <span>实际 {{ a.actualPct }}%</span>
+            </div>
+          </div>
+        </div>
+        <div id="path-warning-area" class="path-warning-area"></div>
+      </div>
+
+      <!-- 卡片 3：五维人格画像（栏收窄后仍放大雷达主体，折线图高度单独保持） -->
+      <div class="ep-card ep-card--chart ep-card--radar">
+        <div class="ep-card-title ep-card-title--radar-heading">五维人格画像</div>
+        <div id="personality-radar" ref="radarEl" class="ep-chart ep-chart--radar" style="width: 100%"></div>
+      </div>
+
+      <!-- 卡片 4：情绪波动曲线（容器勿裁切 ECharts 悬浮层；appendToBody 为首选） -->
+      <div class="ep-card ep-card--chart ep-card--linechart">
+        <div class="ep-card-title">情绪波动曲线</div>
+        <div id="emotion-chart" ref="lineEl" class="ep-chart" style="width: 100%; height: 228px"></div>
+      </div>
     </div>
   </aside>
 </template>
 
 <style>
 @import '../../vendor/front/css/style.css';
+
+/* ==================== 外层背景容器（强制修复！） ==================== */
+.dashboard {
+  background: #F4F6F9 !important;
+  border-left: none !important;
+}
+
+.dashboard-inner {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ==================== 独立卡片组件 ==================== */
+.ep-card {
+  background: #FFFFFF;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  padding: 24px;
+}
+
+.ep-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6B7280;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.ep-card-title.mt-4 {
+  margin-top: 24px;
+}
+
+/* 图表卡：略减左右内边距，为 ECharts 多留出绘制宽度，避免轴标签被裁切 */
+.ep-card--chart {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.ep-card--chart .ep-chart {
+  min-width: 0;
+  width: 100% !important;
+  box-sizing: border-box;
+}
+
+/* 五维雷达：压缩标题上留白、加高图形容器，与 ECharts radius 一起减少「字小、空多」观感 */
+.ep-card--radar {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.ep-card-title--radar-heading {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  color: #1f2a37 !important;
+  margin-bottom: 6px !important;
+  text-transform: none !important;
+}
+
+.ep-card--radar .ep-card-title {
+  margin-bottom: 6px;
+}
+
+#personality-radar.ep-chart--radar {
+  height: 320px;
+  min-height: 320px;
+}
+
+/* 折线图：不裁切 ECharts 悬浮层，避免 tip 在卡片内为不可见；appendToBody 时此处为双保险 */
+.ep-card--linechart {
+  overflow: visible;
+  position: relative;
+  z-index: 2;
+}
+
+#emotion-chart {
+  position: relative;
+  overflow: visible;
+}
+
+/* ==================== 保留原有布局样式但调整 ==================== */
+.dash-header {
+  padding: 0 0 16px 0 !important;
+  border-bottom: none !important;
+}
+
+.dash-section {
+  padding: 0 !important;
+  border-bottom: none !important;
+}
 
 /* 个性化路径分析：高级圆角卡片 + Flex 单行布局复刻图3 */
 .path-analysis-card {
@@ -768,16 +1000,28 @@ onBeforeUnmount(() => {
 }
 
 .path-action-name {
+  display: flex;
+  align-items: center;
   width: 56px;
   flex-shrink: 0;
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.2;
   color: var(--text);
 }
 
 .path-dual-track-flex {
   flex: 1;
-  min-width: 150px;
+  min-width: 0;
+  margin-left: 0;
+}
+
+.emo-bar-track {
+  height: 6px !important;
+}
+
+.path-dual-track {
+  height: 12px !important;
 }
 
 /* 更贴近“圆角进度条”观感：让实际/期待更明显 */
@@ -785,19 +1029,297 @@ onBeforeUnmount(() => {
   opacity: 0.35;
 }
 
-/* 由于旧版 CSS 只对 `.path-bar-head .path-label-tag` 做了基础样式，这里补全 */
+/* 由于旧版 CSS 只对 `.path-bar-head .path-label-tag` 做了基础样式，这里补全（强制修复不折行、不被挤压！ */
 .path-label-tag {
-  font-size: 10px;
-  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  padding: 3px 9px;
   border-radius: 10px;
   font-weight: 600;
+  line-height: 1.2;
+  min-height: 24px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* 白底看板标题：覆盖全局 h2 的 var(--text-h)，避免系统深色主题下标题变成近白字 */
-.dashboard .dash-header h2 {
+.dashboard .dash-header h2,
+.dashboard .dash-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
   color: #1a1d23;
   font-weight: 700;
   letter-spacing: 0.03em;
 }
+
+.dash-header-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: block;
+  object-fit: contain;
+}
+
+/* ===== B2B 数据看板化补丁：追加到 EmotionPanel.vue 底部 ===== */
+
+/* 1) 外层与卡片：扁平化、收敛圆角、去厚重阴影 */
+.dashboard {
+  background: var(--app-bg-subtle) !important;
+  border-left: none !important;
+}
+
+.dashboard-inner {
+  gap: 12px !important;
+}
+
+.ep-card,
+.path-analysis-card,
+.dash-section {
+  background: var(--app-bg-panel) !important;
+  border: 1px solid var(--app-border-default) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+
+/* 2) 标题与正文：克制、专业 */
+.ep-card-title {
+  color: var(--app-text-secondary) !important;
+  letter-spacing: 0.04em !important;
+}
+
+.ep-card-title--with-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 仅「个性化路径分析」等需要标题整行居中时加此类 */
+.ep-card-title--center {
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.ep-title-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: block;
+  object-fit: contain;
+}
+
+.dashboard .dash-header h2,
+.dashboard .dash-header-title {
+  color: var(--app-text-primary) !important;
+  font-weight: 700 !important;
+}
+
+/* 3) 进度条：压薄 + 低干扰轨道 */
+.emo-bar-track {
+  height: 8px !important;
+  background: var(--app-bg-muted) !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+}
+
+.emo-bar-fill {
+  height: 100% !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+}
+
+/* 覆盖内联渐变色：改为主题色 */
+#bar-joy {
+  background: var(--app-color-pleasure) !important;
+}
+#bar-activation {
+  background: var(--app-color-primary) !important;
+}
+#bar-anxiety {
+  background: var(--app-color-anxiety) !important;
+}
+
+/* 路径对比条：更细、更克制 */
+.path-dual-track {
+  height: 8px !important;
+  background: var(--app-bg-muted) !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+}
+
+.path-bar-ideal,
+.path-bar-actual {
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  filter: saturate(0.78) brightness(0.95) !important;
+}
+
+.path-bar-ideal {
+  opacity: 0.35 !important;
+}
+.path-bar-actual {
+  opacity: 0.72 !important;
+}
+
+/* 4) 标签/徽章：降噪（淡底 + 细边 + 主题色文字） */
+.status-badge,
+.path-label-tag {
+  background: var(--app-bg-subtle) !important;
+  border: 1px solid var(--app-border-default) !important;
+  color: var(--app-text-secondary) !important;
+  box-shadow: none !important;
+}
+
+/* 状态徽章内：图标 + 文字垂直居中对齐 */
+.dashboard .status-badge,
+#emotion-status.status-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px;
+  line-height: 1.25;
+  padding: 8px 18px !important;
+  vertical-align: middle;
+}
+
+#emotion-status .status-icon {
+  width: 22px !important;
+  height: 22px !important;
+  margin: 0 !important;
+  flex-shrink: 0;
+  display: block;
+  object-fit: contain;
+}
+
+.status-badge-text {
+  line-height: 1.3;
+  display: inline-block;
+}
+
+/* 推荐 / 适度 / 慎用 语义色（不再高饱和） */
+.path-label-tag.recommended {
+  background: color-mix(in srgb, var(--app-color-pleasure) 10%, var(--app-bg-panel)) !important;
+  border-color: color-mix(in srgb, var(--app-color-pleasure) 35%, var(--app-border-default)) !important;
+  color: var(--app-color-pleasure) !important;
+}
+
+.path-label-tag.neutral {
+  background: color-mix(in srgb, var(--app-color-primary) 8%, var(--app-bg-panel)) !important;
+  border-color: color-mix(in srgb, var(--app-color-primary) 30%, var(--app-border-default)) !important;
+  color: var(--app-color-primary) !important;
+}
+
+.path-label-tag.harmful {
+  background: color-mix(in srgb, var(--app-color-anxiety) 10%, var(--app-bg-panel)) !important;
+  border-color: color-mix(in srgb, var(--app-color-anxiety) 35%, var(--app-border-default)) !important;
+  color: var(--app-color-anxiety) !important;
+}
+
+/* 状态徽章统一弱化（覆盖原先内联 style） */
+#emotion-status.status-badge {
+  background: var(--app-bg-subtle) !important;
+  border-color: var(--app-border-default) !important;
+  color: var(--app-text-secondary) !important;
+}
+
+/* 细节：数字与辅助信息更“看板化” */
+.emo-bar-val,
+.path-bar-labels,
+.path-compare .path-action-name {
+  color: var(--app-text-secondary) !important;
+}
+
+/* 强制修复进度条宽度和间距 */
+.emo-bar-item {
+  margin-bottom: 16px !important;
+}
+.emo-bar-item:last-child {
+  margin-bottom: 0 !important;
+}
+.emo-bar-label {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  margin-bottom: 8px !important;
+}
+.emo-bar-track {
+  display: block !important;
+  width: 100% !important;
+  height: 8px !important;
+  background: var(--app-bg-muted) !important;
+  border-radius: 999px !important;
+  overflow: hidden !important;
+}
+.emo-bar-fill {
+  max-width: 100% !important;
+}
+
+.emo-name-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.emo-name-wrap > span {
+  line-height: 1.3;
+}
+
+.emo-bar-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: block;
+  object-fit: contain;
+}
+
+/* ===== 修复个性化路径分析进度条溢出 ===== */
+.path-dual-track-flex {
+  flex: 1 1 0% !important;
+  min-width: 0 !important; /* 核心修复：干掉原代码里硬编码的 150px */
+}
+
+.path-action-row {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.path-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.path-bar-item {
+  min-width: 0;
+}
+
+.path-bar-labels {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: baseline;
+  width: 100%;
+  margin-top: 6px !important;
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  gap: 8px;
+}
+
+.status-badge-wrap {
+  display: flex;
+  justify-content: center;
+}
+
 </style>
 

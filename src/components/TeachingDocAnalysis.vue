@@ -1,5 +1,6 @@
-<script setup>
+﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch, TransitionGroup } from 'vue'
+const uploadIcon = '/custom-upload-icon.png'
 
 const emit = defineEmits(['request-classroom-sim'])
 
@@ -735,6 +736,14 @@ function getMindmapLayoutMetrics(containerEl) {
 }
 
 function buildMindmapSeriesOption(containerEl) {
+  // ECharts 树图在 canvas 上不能可靠解析 var()，会表现为浅色/白字；此处用与 :root 设计 token 一致的实色
+  const labelOnLight = {
+    main: '#1f2a37',
+    leaf: '#4b5563',
+    line: '#c4cbd4',
+    node: '#2f5d7c',
+    nodeBorder: '#2f5d7c',
+  }
   const { labelWidth, rightPadPct } = getMindmapLayoutMetrics(containerEl)
   const labelCommon = {
     position: 'right',
@@ -748,8 +757,7 @@ function buildMindmapSeriesOption(containerEl) {
   return {
     type: 'tree',
     orient: 'LR',
-    // 仅保留拖拽平移，避免 ECharts 注册 wheel/mousewheel 监听导致 Violation 提示
-    roam: 'move',
+    roam: true,
     initialTreeDepth: -1,
     top: '6%',
     left: '10%',
@@ -758,24 +766,24 @@ function buildMindmapSeriesOption(containerEl) {
     symbolSize: 8,
     layerPadding: 32,
     lineStyle: {
-      color: '#cbd5e1',
+      color: labelOnLight.line,
       width: 1.2,
     },
     label: {
       ...labelCommon,
-      color: '#334155',
+      color: labelOnLight.main,
     },
     leaves: {
       label: {
         ...labelCommon,
-        color: '#475569',
+        color: labelOnLight.leaf,
         fontSize: 12,
         lineHeight: 17,
       },
     },
     itemStyle: {
-      color: '#64748b',
-      borderColor: '#64748b',
+      color: labelOnLight.node,
+      borderColor: labelOnLight.nodeBorder,
     },
     emphasis: {
       focus: 'descendant',
@@ -785,7 +793,6 @@ function buildMindmapSeriesOption(containerEl) {
     animationDurationUpdate: 700,
   }
 }
-
 /**
  * 导出 PDF 用：离屏渲染与弹窗一致的 ECharts 树图，截图为 PNG（html2pdf 无法复刻 canvas 导图）。
  */
@@ -2143,27 +2150,25 @@ onBeforeUnmount(() => {
             @dragleave.prevent="onUploadDragLeave"
             @drop.prevent="onDrop"
           >
-          <div class="upload-emoji">🗂️</div>
-          <h3>教学材料深度诊断系统</h3>
-          <p class="upload-intro">基于教学大纲一致性分析，适上传教案、课件和板书笔记，系统将为您提炼知识图谱并诊断教学盲点。</p>
-          <div class="upload-rule-panel">
-            <p class="upload-rule-title">支持以下文件类型</p>
-            <p><strong>文档（仅支持）：</strong>.docx、.pptx（单个文件最大 200MB）</p>
-            <p><strong>图片：</strong>.jpg、.png、.jpeg（单个文件最大 50MB）</p>
-          </div>
-          <label class="upload-btn" :class="{ 'is-disabled': sending }" for="teaching-doc-input"
-            >选择文件</label
-          >
-          <input
-            id="teaching-doc-input"
-            class="upload-input"
-            type="file"
-            :accept="ACCEPT_TYPES"
-            multiple
-            :disabled="sending"
-            @change="onChooseFiles"
-          />
-        </section>
+            <img class="upload-icon-img" :src="uploadIcon" alt="上传图标" />
+            <div class="upload-rule-panel">
+              <p class="upload-rule-title">支持以下文件类型</p>
+              <p><strong>文档（仅支持）：</strong>.docx、.pptx（单个文件最大 200MB）</p>
+              <p><strong>图片：</strong>.jpg、.png、.jpeg（单个文件最大 50MB）</p>
+            </div>
+            <label class="upload-btn" :class="{ 'is-disabled': sending }" for="teaching-doc-input"
+              >选择文件</label
+            >
+            <input
+              id="teaching-doc-input"
+              class="upload-input"
+              type="file"
+              :accept="ACCEPT_TYPES"
+              multiple
+              :disabled="sending"
+              @change="onChooseFiles"
+            />
+          </section>
 
           <section class="file-panel">
             <div class="file-panel-head">
@@ -2538,7 +2543,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   padding: 20px;
   overflow: auto;
-  background: linear-gradient(180deg, #f7f5ef 0%, #f2eee4 100%);
+  background: var(--app-bg-page);
 }
 
 .doc-toast-host {
@@ -2564,34 +2569,32 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.45;
   text-align: center;
-  color: #0f172a;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.1);
+  color: var(--app-text-primary);
+  background: var(--app-bg-panel);
+  border: 1px solid var(--app-border-default);
+  box-shadow: none;
 }
 
 .doc-toast--ok {
-  border-color: rgba(59, 130, 246, 0.35);
-  background: rgba(239, 246, 255, 0.96);
+  border-color: var(--app-color-primary-border);
+  background: var(--app-color-primary-soft);
 }
 
 .doc-toast--warn {
-  border-color: rgba(245, 158, 11, 0.45);
-  background: rgba(255, 251, 235, 0.96);
-  color: #78350f;
+  border-color: var(--app-color-anxiety-border);
+  background: var(--app-color-anxiety-soft);
+  color: var(--app-color-anxiety-text);
 }
 
 .doc-toast--done {
-  border-color: rgba(34, 197, 94, 0.4);
-  background: rgba(240, 253, 244, 0.96);
-  color: #14532d;
+  border-color: var(--app-color-pleasure-border);
+  background: var(--app-color-pleasure-soft);
+  color: var(--app-color-pleasure-text);
 }
 
 .doc-toast-enter-active,
 .doc-toast-leave-active {
-  transition:
-    opacity 0.28s ease,
-    transform 0.28s ease;
+  transition: opacity 0.28s ease, transform 0.28s ease;
 }
 
 .doc-toast-enter-from,
@@ -2609,9 +2612,9 @@ onBeforeUnmount(() => {
   margin: 0 auto;
   padding: 24px;
   border-radius: 20px;
-  border: 1px solid rgba(45, 52, 54, 0.12);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 18px 40px rgba(45, 52, 54, 0.08);
+  border: 1px solid var(--app-border-default);
+  background: var(--app-bg-panel);
+  box-shadow: none;
 }
 
 .upload-stage {
@@ -2627,15 +2630,15 @@ onBeforeUnmount(() => {
   margin: 0 0 12px;
   padding: 10px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  background: linear-gradient(90deg, rgba(239, 246, 255, 0.95), rgba(224, 242, 254, 0.75));
+  border: 1px solid var(--app-color-primary-border);
+  background: var(--app-color-primary-soft);
   font-size: 13px;
   line-height: 1.55;
-  color: #1e3a5f;
+  color: var(--app-text-secondary);
 }
 
 .analysis-batch-banner strong {
-  color: #1d4ed8;
+  color: var(--app-color-primary);
 }
 
 .analysis-loading-overlay {
@@ -2657,9 +2660,9 @@ onBeforeUnmount(() => {
   padding: 28px 32px;
   text-align: center;
   border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.45);
+  border: 1px solid var(--app-border-default);
   background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 16px 40px rgba(30, 41, 59, 0.12);
+  box-shadow: none;
 }
 
 .analysis-loading-spinner {
@@ -2667,8 +2670,8 @@ onBeforeUnmount(() => {
   height: 44px;
   margin: 0 auto 16px;
   border-radius: 50%;
-  border: 3px solid rgba(52, 152, 219, 0.22);
-  border-top-color: #2d7fd8;
+  border: 3px solid var(--app-border-default);
+  border-top-color: var(--app-color-primary);
   animation: analysis-spin 0.75s linear infinite;
 }
 
@@ -2676,29 +2679,27 @@ onBeforeUnmount(() => {
   margin: 0 0 8px;
   font-size: 18px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--app-text-primary);
 }
 
 .analysis-loading-progress {
   margin: 0 0 8px;
   font-size: 13px;
   font-weight: 600;
-  color: #2563eb;
+  color: var(--app-color-primary);
 }
 
 .analysis-loading-detail {
   margin: 0;
   font-size: 14px;
   line-height: 1.55;
-  color: #475569;
+  color: var(--app-text-tertiary);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 @keyframes analysis-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 .doc-header {
@@ -2711,74 +2712,69 @@ onBeforeUnmount(() => {
 
 .doc-header h2 {
   margin: 0 0 6px;
-  font-size: 28px;
-  color: #1f2d3d;
+  font-size: 24px !important;
+  font-weight: 600 !important;
+  color: var(--app-text-primary) !important;
+  margin-bottom: 24px !important;
 }
 
 .doc-header p {
   margin: 0;
   font-size: 14px;
-  color: #6c7a89;
+  color: var(--app-text-tertiary);
+}
+
+.doc-analysis-page * {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", STHeiti, "Microsoft Yahei", Tahoma, Simsun, sans-serif !important;
 }
 
 .upload-dropzone {
-  border: 1.5px dashed rgba(52, 152, 219, 0.32);
-  border-radius: 18px;
-  padding: 52px 22px;
-  text-align: center;
-  background: rgba(52, 152, 219, 0.03);
-  transition: all 0.2s ease;
+  border: 1.5px dashed var(--app-color-primary-border) !important;
+  border-radius: 18px !important;
+  padding: 52px 22px !important;
+  text-align: center !important;
+  background: var(--app-color-primary-soft) !important;
+  transition: all 0.2s ease !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 16px !important;
 }
 
 .upload-dropzone--over {
-  border-color: rgba(41, 128, 185, 0.85);
-  background: rgba(52, 152, 219, 0.14);
+  border-color: var(--app-color-primary) !important;
+  background: var(--app-bg-subtle) !important;
 }
 
-.upload-emoji {
-  font-size: 44px;
-  margin-bottom: 10px;
-}
-
-.upload-dropzone h3 {
-  margin: 8px 0;
-  color: #1f2937;
-  font-size: 36px;
-  line-height: 1.24;
-  letter-spacing: 0.4px;
-}
-
-.upload-intro {
-  margin: 0 auto 20px;
-  color: #64748b;
-  max-width: 680px;
-  font-size: 14px;
-  line-height: 1.7;
-  letter-spacing: 0.1px;
+.upload-icon-img {
+  width: 256px !important;
+  height: 256px !important;
+  display: block !important;
+  object-fit: contain !important;
+  opacity: 1 !important;
 }
 
 .upload-rule-panel {
-  margin: 0 auto 16px;
-  max-width: 760px;
-  padding: 12px 14px;
-  text-align: left;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.38);
-  background: rgba(248, 250, 252, 0.96);
-}
-
-.upload-rule-title {
-  margin: 0 0 6px;
-  font-size: 18px;
-  font-weight: 700;
-  color: #0f172a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
 }
 
 .upload-rule-panel p {
-  margin: 3px 0;
-  color: #1f2937;
-  font-size: 16px;
-  line-height: 1.45;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--app-text-tertiary);
+}
+
+.upload-rule-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text-secondary);
 }
 
 .upload-btn {
@@ -2787,8 +2783,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding: 10px 22px;
   border-radius: 12px;
-  background: linear-gradient(180deg, #4a9bf3, #2d7fd8);
-  color: #fff;
+  background: var(--app-color-primary);
+  color: var(--app-bg-panel);
   font-weight: 700;
   cursor: pointer;
 }
@@ -2805,7 +2801,7 @@ onBeforeUnmount(() => {
 
 .file-panel {
   margin-top: 14px;
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.86);
 }
@@ -2814,23 +2810,23 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(45, 52, 54, 0.08);
+  border-bottom: 1px solid var(--app-border-default);
 }
 
 .file-panel-head h4 {
   margin: 0;
-  color: #2d3436;
+  color: var(--app-text-primary);
 }
 
 .file-panel-head span {
-  color: #7f8c8d;
+  color: var(--app-text-tertiary);
   font-size: 12px;
 }
 
 .file-empty {
   padding: 20px 14px;
   text-align: center;
-  color: #95a5a6;
+  color: var(--app-text-tertiary);
 }
 
 .file-list {
@@ -2847,8 +2843,8 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 10px;
   border-radius: 10px;
-  background: #f8f9fb;
-  border: 1px solid rgba(45, 52, 54, 0.08);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border-default);
 }
 
 .file-main {
@@ -2857,14 +2853,14 @@ onBeforeUnmount(() => {
 
 .file-main strong {
   display: block;
-  color: #2d3436;
+  color: var(--app-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .file-main small {
-  color: #7f8c8d;
+  color: var(--app-text-tertiary);
 }
 
 .file-remove {
@@ -2872,8 +2868,8 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
-  background: rgba(231, 76, 60, 0.12);
-  color: #b23d2f;
+  background: var(--app-color-anxiety-soft);
+  color: var(--app-color-anxiety-text);
   font-weight: 700;
 }
 
@@ -2895,7 +2891,7 @@ onBeforeUnmount(() => {
   min-height: 42px;
   min-width: 168px;
   padding: 10px 18px;
-  color: #fff;
+  color: var(--app-bg-panel);
   font-weight: 700;
   font-size: clamp(13px, 1.8vw, 15px);
   line-height: 1.2;
@@ -2904,7 +2900,7 @@ onBeforeUnmount(() => {
   writing-mode: horizontal-tb;
   text-orientation: mixed;
   cursor: pointer;
-  background: linear-gradient(180deg, #1565c0, #0d47a1);
+  background: var(--app-color-primary);
 }
 
 .send-btn:disabled {
@@ -2913,14 +2909,14 @@ onBeforeUnmount(() => {
 }
 
 .debug-panel-btn {
-  border: none;
+  border: 1px solid var(--app-border-default);
   border-radius: 12px;
   min-height: 42px;
   padding: 10px 16px;
-  color: #1f2937;
+  color: var(--app-text-primary);
   font-weight: 700;
   cursor: pointer;
-  background: linear-gradient(180deg, #fde68a, #facc15);
+  background: var(--app-bg-subtle);
 }
 
 .debug-panel-btn--inline {
@@ -2930,7 +2926,7 @@ onBeforeUnmount(() => {
 }
 
 .send-ok {
-  color: #1e7f45;
+  color: var(--app-color-pleasure-text);
   font-size: 13px;
   font-weight: 600;
 }
@@ -2938,30 +2934,30 @@ onBeforeUnmount(() => {
 .send-info {
   margin: 10px 0 0;
   text-align: center;
-  color: #0d47a1;
+  color: var(--app-color-primary);
   font-size: 13px;
 }
 
 .send-error {
   margin: 10px 0 0;
   text-align: center;
-  color: #b23d2f;
+  color: var(--app-color-anxiety-text);
   font-size: 13px;
   font-weight: 600;
 }
 
 .visual-panel {
   margin-top: 14px;
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 12px;
-  background: #fff;
+  background: var(--app-bg-panel);
   overflow: hidden;
 }
 
 .visual-head {
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(45, 52, 54, 0.08);
-  color: #1f2d3d;
+  border-bottom: 1px solid var(--app-border-default);
+  color: var(--app-text-primary);
 }
 
 .visual-grid {
@@ -2972,31 +2968,31 @@ onBeforeUnmount(() => {
 }
 
 .visual-card {
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 10px;
-  background: #f8fafc;
+  background: var(--app-bg-subtle);
   padding: 10px;
   min-width: 0;
 }
 
 .visual-card h5 {
   margin: 0 0 8px;
-  color: #0f172a;
+  color: var(--app-text-primary);
 }
 
 .visual-card p {
   margin: 4px 0;
-  color: #334155;
+  color: var(--app-text-secondary);
   font-size: 12px;
   word-break: break-word;
 }
 
 .debug-console {
   margin-top: 14px;
-  border: 1px solid rgba(45, 52, 54, 0.14);
+  border: 1px solid var(--app-border-strong);
   border-radius: 12px;
-  background: #111827;
-  color: #e5e7eb;
+  background: var(--app-text-primary);
+  color: var(--app-bg-page);
   overflow: hidden;
 }
 
@@ -3006,7 +3002,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  border-bottom: 1px solid var(--app-border-strong);
 }
 
 .debug-page-panel {
@@ -3019,7 +3015,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  border-bottom: 1px solid var(--app-border-strong);
 }
 
 .debug-clear {
@@ -3027,8 +3023,8 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
-  color: #111827;
-  background: #e5e7eb;
+  color: var(--app-text-primary);
+  background: var(--app-bg-muted);
   font-weight: 700;
 }
 
@@ -3042,8 +3038,8 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
-  color: #111827;
-  background: #fde68a;
+  color: var(--app-text-primary);
+  background: var(--app-bg-muted);
   font-weight: 700;
 }
 
@@ -3059,8 +3055,8 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
-  color: #e2e8f0;
-  background: #2563eb;
+  color: var(--app-bg-panel);
+  background: var(--app-color-primary);
   font-weight: 700;
 }
 
@@ -3070,14 +3066,14 @@ onBeforeUnmount(() => {
 }
 
 .debug-export--muted {
-  color: #1e40af;
-  background: #e0ecff;
-  border: 1px solid rgba(37, 99, 235, 0.35);
+  color: var(--app-color-primary);
+  background: var(--app-color-primary-soft);
+  border: 1px solid var(--app-color-primary-border);
 }
 
 .debug-empty {
   padding: 14px 12px;
-  color: #94a3b8;
+  color: var(--app-text-tertiary);
 }
 
 .debug-list {
@@ -3090,14 +3086,14 @@ onBeforeUnmount(() => {
 
 .debug-item {
   padding: 10px 12px;
-  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  border-top: 1px solid var(--app-border-strong);
 }
 
 .debug-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #cbd5e1;
+  color: var(--app-bg-muted);
   font-size: 12px;
   margin-bottom: 6px;
 }
@@ -3114,21 +3110,21 @@ onBeforeUnmount(() => {
 }
 
 .debug-tag-send {
-  background: rgba(34, 197, 94, 0.24);
-  color: #86efac;
+  background: var(--app-color-pleasure-soft);
+  color: var(--app-color-pleasure-text);
 }
 
 .debug-tag-recv {
-  background: rgba(59, 130, 246, 0.24);
-  color: #93c5fd;
+  background: var(--app-color-primary-soft);
+  color: var(--app-color-primary);
 }
 
 .debug-text {
   margin: 0;
   padding: 8px;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.9);
-  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--app-bg-page);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -3137,9 +3133,9 @@ onBeforeUnmount(() => {
 
 .workflow-viz-panel {
   margin-top: 14px;
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 16px;
-  background: #fff;
+  background: var(--app-bg-panel);
   overflow: hidden;
 }
 
@@ -3151,7 +3147,7 @@ onBeforeUnmount(() => {
   padding: 24px;
   border: none;
   border-radius: 0;
-  background: rgba(15, 23, 42, 0.42);
+  background: rgba(31, 42, 55, 0.42);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3161,15 +3157,15 @@ onBeforeUnmount(() => {
   width: min(1380px, 97vw);
   max-height: 92vh;
   overflow: auto;
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 16px;
-  background: #ffffff;
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25);
+  background: var(--app-bg-panel);
+  box-shadow: none;
 }
 
 .workflow-viz-head {
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(45, 52, 54, 0.08);
+  border-bottom: 1px solid var(--app-border-default);
   display: flex;
   justify-content: flex-start;
   gap: 10px;
@@ -3178,33 +3174,33 @@ onBeforeUnmount(() => {
 
 .workflow-viz-head strong {
   font-size: 18px;
-  color: #0f172a;
+  color: var(--app-text-primary);
 }
 
 .back-upload-btn {
-  border: 1px solid #ef4444;
-  background: #fff1f2;
-  color: #b91c1c;
+  border: 1px solid var(--app-color-anxiety-border);
+  background: var(--app-color-anxiety-soft);
+  color: var(--app-color-anxiety-text);
   font-weight: 700;
   border-radius: 999px;
   padding: 6px 12px;
   cursor: pointer;
-  box-shadow: 0 1px 0 rgba(185, 28, 28, 0.08);
+  box-shadow: none;
 }
 
 .workflow-viz-sub {
   margin-left: auto;
   font-size: 12px;
-  color: #64748b;
+  color: var(--app-text-tertiary);
 }
 
 .workflow-viz-sub--busy {
-  color: #b45309;
+  color: var(--app-color-anxiety-text);
 }
 
 .workflow-viz-empty {
   padding: 12px;
-  color: #64748b;
+  color: var(--app-text-tertiary);
 }
 
 .analysis-main {
@@ -3213,9 +3209,9 @@ onBeforeUnmount(() => {
 
 .report-switcher-panel {
   margin-top: 14px;
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 14px;
-  background: rgba(248, 250, 252, 0.95);
+  background: var(--app-bg-subtle);
   padding: 12px;
 }
 
@@ -3227,7 +3223,7 @@ onBeforeUnmount(() => {
 }
 
 .analysis-sidebar-head small {
-  color: #64748b;
+  color: var(--app-text-tertiary);
   font-size: 12px;
 }
 
@@ -3243,9 +3239,9 @@ onBeforeUnmount(() => {
 .analysis-file-item {
   flex: 1 1 240px;
   max-width: 320px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--app-border-default);
   border-radius: 10px;
-  background: #fff;
+  background: var(--app-bg-panel);
   padding: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -3253,14 +3249,14 @@ onBeforeUnmount(() => {
 
 .analysis-file-item strong {
   display: block;
-  color: #0f172a;
+  color: var(--app-text-primary);
   font-size: 12px;
   word-break: break-word;
 }
 
 .analysis-file-item small {
   display: block;
-  color: #64748b;
+  color: var(--app-text-tertiary);
   font-size: 11px;
 }
 
@@ -3282,8 +3278,8 @@ onBeforeUnmount(() => {
 }
 
 .analysis-file-item.is-active {
-  border-color: #60a5fa;
-  background: #eff6ff;
+  border-color: var(--app-color-primary-border);
+  background: var(--app-color-primary-soft);
 }
 
 .workflow-kpis {
@@ -3311,64 +3307,64 @@ onBeforeUnmount(() => {
 }
 
 .analysis-method-tag.is-on {
-  color: #166534;
-  background: #dcfce7;
-  border-color: #86efac;
+  color: var(--app-color-pleasure-text);
+  background: var(--app-color-pleasure-soft);
+  border-color: var(--app-color-pleasure-border);
 }
 
 .analysis-method-tag.is-off {
-  color: #64748b;
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  color: var(--app-text-tertiary);
+  background: var(--app-bg-subtle);
+  border-color: var(--app-border-default);
 }
 
 .execution-toggle-btn {
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--app-border-default);
   border-radius: 999px;
   padding: 4px 12px;
-  background: #ffffff;
-  color: #334155;
+  background: var(--app-bg-panel);
+  color: var(--app-text-secondary);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .execution-toggle-btn:hover {
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  border-color: var(--app-color-primary-border);
+  color: var(--app-color-primary);
 }
 
 .workflow-kpi {
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 10px;
   padding: 8px;
-  background: #f8fafc;
+  background: var(--app-bg-subtle);
 }
 
 .workflow-kpi small {
   display: block;
-  color: #64748b;
+  color: var(--app-text-tertiary);
   font-size: 11px;
   margin-bottom: 4px;
 }
 
 .workflow-kpi strong {
-  color: #0f172a;
+  color: var(--app-text-primary);
   font-size: 13px;
   word-break: break-word;
 }
 
 .workflow-card {
   margin: 0 10px 10px;
-  border: 1px solid rgba(45, 52, 54, 0.1);
+  border: 1px solid var(--app-border-default);
   border-radius: 14px;
-  background: #f8fafc;
+  background: var(--app-bg-subtle);
   padding: 12px;
 }
 
 .workflow-card h5 {
   margin: 0 0 8px;
-  color: #0f172a;
+  color: var(--app-text-primary);
 }
 
 .analysis-dual-grid {
@@ -3379,7 +3375,7 @@ onBeforeUnmount(() => {
 }
 
 .workflow-empty-mini {
-  color: #64748b;
+  color: var(--app-text-tertiary);
   font-size: 12px;
 }
 
@@ -3394,34 +3390,34 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   font-size: 12px;
-  color: #334155;
+  color: var(--app-text-secondary);
 }
 
 .perf-item-head strong {
-  color: #0f172a;
+  color: var(--app-text-primary);
 }
 
 .perf-track {
   margin-top: 4px;
   height: 8px;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--app-bg-muted);
   overflow: hidden;
 }
 
 .perf-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  background: var(--app-color-primary);
 }
 
 .perf-fill--token {
-  background: linear-gradient(90deg, #34d399, #059669);
+  background: var(--app-color-pleasure);
 }
 
 .mindmap-root {
   font-weight: 700;
-  color: #0f172a;
+  color: var(--app-text-primary);
   margin-bottom: 8px;
 }
 
@@ -3432,43 +3428,43 @@ onBeforeUnmount(() => {
 }
 
 .mindmap-group {
-  border: 1px dashed rgba(45, 52, 54, 0.2);
+  border: 1px dashed var(--app-border-strong);
   border-radius: 8px;
   padding: 8px;
-  background: #fff;
+  background: var(--app-bg-panel);
 }
 
 .mindmap-group strong {
-  color: #1e293b;
+  color: var(--app-text-primary);
 }
 
 .mindmap-group ul {
   margin: 6px 0 0;
   padding-left: 18px;
-  color: #334155;
+  color: var(--app-text-secondary);
   font-size: 12px;
 }
 
 .diag-list {
   margin: 6px 0 0;
   padding-left: 18px;
-  color: #334155;
+  color: var(--app-text-secondary);
   font-size: 12px;
 }
 
 .diag-suggestions-empty {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--app-text-tertiary);
 }
 
 .diag-score-card {
   margin: 0 0 14px;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid #93c5fd;
-  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 45%, #dbeafe 100%);
-  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.1);
+  border: 1px solid var(--app-color-primary-border);
+  background: var(--app-color-primary-soft);
+  box-shadow: none;
 }
 
 .diag-score-card__row {
@@ -3483,14 +3479,14 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.06em;
-  color: #1e3a8a;
+  color: var(--app-text-primary);
   text-transform: none;
 }
 
 .diag-score-card__value {
   font-size: 20px;
   font-weight: 800;
-  color: #1d4ed8;
+  color: var(--app-color-primary);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -3498,7 +3494,7 @@ onBeforeUnmount(() => {
 .diag-score-card__track {
   height: 10px;
   border-radius: 999px;
-  background: #bfdbfe;
+  background: var(--app-bg-muted);
   overflow: hidden;
 }
 
@@ -3509,15 +3505,15 @@ onBeforeUnmount(() => {
 }
 
 .diag-score-card__fill--high {
-  background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+  background: var(--app-color-primary);
 }
 
 .diag-score-card__fill--mid {
-  background: linear-gradient(90deg, #f59e0b, #ea580c);
+  background: var(--app-color-neutral);
 }
 
 .diag-score-card__fill--low {
-  background: linear-gradient(90deg, #f97316, #dc2626);
+  background: var(--app-color-anxiety);
 }
 
 .diag-next-step {
@@ -3527,17 +3523,17 @@ onBeforeUnmount(() => {
 }
 
 .diag-next-step--classroom {
-  border: 1px solid rgba(37, 99, 235, 0.55);
-  border-left: 4px solid #2563eb;
-  background: linear-gradient(145deg, #ffffff 0%, #eff6ff 38%, #dbeafe 100%);
-  box-shadow: 0 10px 28px rgba(30, 64, 175, 0.18);
+  border: 1px solid var(--app-color-primary-border);
+  border-left: 4px solid var(--app-color-primary);
+  background: var(--app-color-primary-soft);
+  box-shadow: none;
 }
 
 .diag-next-step--material {
-  border: 1px solid rgba(234, 88, 12, 0.42);
-  border-left: 4px solid #ea580c;
-  background: linear-gradient(145deg, #ffffff 0%, #fff7ed 38%, #ffedd5 100%);
-  box-shadow: 0 10px 28px rgba(154, 52, 18, 0.16);
+  border: 1px solid var(--app-color-anxiety-border);
+  border-left: 4px solid var(--app-color-anxiety);
+  background: var(--app-color-anxiety-soft);
+  box-shadow: none;
 }
 
 .diag-next-step__top {
@@ -3552,26 +3548,26 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
-  color: #fff;
-  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  color: var(--app-bg-panel);
+  background: var(--app-color-primary);
+  box-shadow: none;
 }
 
 .diag-next-step__badge--material {
-  background: linear-gradient(180deg, #f97316, #ea580c);
-  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.35);
+  background: var(--app-color-anxiety);
+  box-shadow: none;
 }
 
 .diag-next-step__kicker {
   margin: 0 0 8px;
   font-size: 12px;
   font-weight: 700;
-  color: #1e40af;
+  color: var(--app-color-primary);
   letter-spacing: 0.02em;
 }
 
 .diag-next-step__kicker--material {
-  color: #9a3412;
+  color: var(--app-color-anxiety-text);
 }
 
 .diag-next-step__body {
@@ -3580,16 +3576,16 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.65;
-  color: #0f172a;
+  color: var(--app-text-primary);
   background: rgba(255, 255, 255, 0.72);
   border-radius: 10px;
-  border: 1px solid rgba(147, 197, 253, 0.65);
+  border: 1px solid var(--app-color-primary-border);
 }
 
 .diag-next-step__body--material {
-  border-color: rgba(251, 146, 60, 0.55);
+  border-color: var(--app-color-anxiety-border);
   background: rgba(255, 255, 255, 0.88);
-  color: #431407;
+  color: var(--app-text-primary);
 }
 
 .diag-next-step__jump {
@@ -3602,9 +3598,9 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   padding: 12px 14px;
   text-align: left;
-  color: #fff;
-  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 55%, #1e3a8a 100%);
-  box-shadow: 0 6px 20px rgba(29, 78, 216, 0.45);
+  color: var(--app-bg-panel);
+  background: var(--app-color-primary);
+  box-shadow: none;
 }
 
 .diag-next-step__jump:hover {
@@ -3617,17 +3613,17 @@ onBeforeUnmount(() => {
 }
 
 .diag-next-step__jump:focus-visible {
-  outline: 3px solid #93c5fd;
+  outline: 3px solid var(--app-color-primary-border);
   outline-offset: 2px;
 }
 
 .diag-next-step__jump--material {
-  background: linear-gradient(180deg, #ea580c 0%, #c2410c 55%, #9a3412 100%);
-  box-shadow: 0 6px 20px rgba(194, 65, 12, 0.45);
+  background: var(--app-color-anxiety);
+  box-shadow: none;
 }
 
 .diag-next-step__jump--material:focus-visible {
-  outline-color: #fdba74;
+  outline-color: var(--app-color-anxiety-border);
 }
 
 .diag-next-step__jump-icon {
@@ -3680,9 +3676,9 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   font-size: 12px;
   line-height: 1.5;
-  color: #475569;
-  background: linear-gradient(180deg, #f1f5f9, #e8eef5);
-  border: 1px solid #cbd5e1;
+  color: var(--app-text-tertiary);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border-default);
 }
 
 .mindmap-roam-hint__label {
@@ -3692,12 +3688,12 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
-  color: #1e40af;
-  background: #dbeafe;
+  color: var(--app-color-primary);
+  background: var(--app-color-primary-soft);
 }
 
 .mindmap-roam-hint strong {
-  color: #0f172a;
+  color: var(--app-text-primary);
   font-weight: 700;
 }
 
@@ -3724,17 +3720,17 @@ onBeforeUnmount(() => {
 
 .analysis-report-card p {
   margin: 6px 0;
-  color: #334155;
+  color: var(--app-text-secondary);
   font-size: 13px;
   line-height: 1.55;
 }
 
 .diag-quote {
   margin: 12px 0 0;
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--app-color-anxiety);
   padding: 10px;
-  background: #fff7ed;
-  color: #7c2d12;
+  background: var(--app-color-anxiety-soft);
+  color: var(--app-color-anxiety-text);
   font-size: 12px;
 }
 
@@ -3742,60 +3738,44 @@ onBeforeUnmount(() => {
   .doc-analysis-page {
     padding: 10px;
   }
-
   .doc-shell {
     padding: 14px;
     border-radius: 14px;
   }
-
   .doc-header {
     flex-direction: column;
   }
-
   .doc-header h2 {
     font-size: 22px;
   }
-
-  .upload-dropzone h3 {
-    font-size: 24px;
-  }
-
   .doc-footer {
     justify-content: center;
     align-items: center;
   }
-
   .send-btn {
     min-width: 156px;
     font-size: 14px;
   }
-
   .visual-grid {
     grid-template-columns: 1fr;
   }
-
   .workflow-kpis {
     grid-template-columns: 1fr 1fr;
   }
-
   .analysis-dual-grid {
     grid-template-columns: 1fr;
     padding: 0 10px 10px;
   }
-
   .analysis-main-grid {
     grid-template-columns: 1fr;
   }
-
   .analysis-file-item {
     max-width: 100%;
   }
-
   .analysis-graph-card,
   .analysis-report-card {
     min-height: auto;
   }
-
   .mindmap-groups {
     grid-template-columns: 1fr;
   }

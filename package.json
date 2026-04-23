@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "html2pdf.js": "^0.14.0",
+    "lucide-vue-next": "^1.0.0",
     "vue": "^3.5.30"
   },
   "devDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.0.0-rc.16",
     "@vitejs/plugin-vue": "^6.0.5",
     "vite": "^8.0.0"
   }

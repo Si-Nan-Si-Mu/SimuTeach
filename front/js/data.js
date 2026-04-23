@@ -18,7 +18,7 @@ const CHARACTERS = {
       socialSkill: 30
     },
     traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
-    personality: '学习动机激发（李大志）',
+    personality: '习得性无助型',
     emotion: { joy: 20, activation: 15, anxiety: 75 },
     dialogues: [
       {
@@ -87,7 +87,7 @@ const CHARACTERS = {
       socialSkill: 85
     },
     traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
-    personality: '课堂管理（张一鸣）',
+    personality: '注意力分散型',
     emotion: { joy: 70, activation: 85, anxiety: 15 },
     dialogues: [
       {
@@ -156,7 +156,7 @@ const CHARACTERS = {
       socialSkill: 60
     },
     traitLabels: ['自信心', '表达力', '焦虑度', '学习动力', '社交能力'],
-    personality: '心理情绪沟通（林暖暖）',
+    personality: '高敏感型',
     emotion: { joy: 45, activation: 40, anxiety: 55 },
     dialogues: [
       {
