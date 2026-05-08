@@ -1,6 +1,6 @@
 /**
  * 从 Chat Completions 形态的 JSON（完整或流式片段）中提取 assistant 对话正文；
- * 并兼容腾讯云等工作流返回的外层结构（payload / can_feedback / content 嵌套 JSON 字符串等）。
+ * 并兼容多种网关返回的外层结构（payload / can_feedback / content 嵌套 JSON 字符串等）。
  */
 
 function unescapeJsonStringContent(s) {
@@ -80,7 +80,7 @@ export function tryParseLenientWorkflowJson(s) {
 }
 
 /**
- * 从工作流对象任意深度取出「给学生看的」文本（跳过 can_feedback 等元数据壳子）
+ * 从响应对象任意深度取出「给学生看的」文本（跳过 can_feedback 等元数据壳子）
  */
 export function deepExtractAssistantDialogFromObject(obj, depth = 0) {
   if (!obj || typeof obj !== 'object' || depth > 14) return ''

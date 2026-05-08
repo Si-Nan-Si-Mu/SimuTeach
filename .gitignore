@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.vite
 *.local
 
 # 密钥与本地环境（含课堂/专项 Bot Key）

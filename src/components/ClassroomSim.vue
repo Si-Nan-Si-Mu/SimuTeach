@@ -16,7 +16,7 @@ function requestTrainingReport() {
   emit('report')
 }
 
-/** 与左侧专项模拟 SideBar 中三个人格一致（id 便于工作流区分对象） */
+/** 与左侧专项模拟 SideBar 中三个人格一致（id 便于后端区分对象） */
 const students = ref([
   {
     id: 'dazhi',
@@ -51,7 +51,7 @@ const selectedStudent = computed(() => {
 })
 
 const broadcastText = ref('')
-/** 与课堂工作流会话一致，便于多轮上下文 */
+/** 与课堂对话会话一致，便于多轮上下文 */
 const classroomSessionId = ref(`classroom_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
 const workflowBusy = ref(false)
 /** SSE 流式预览（控制台亦有 [ClassroomWorkflow] 日志） */
@@ -628,7 +628,7 @@ const onBroadcast = async ({ forceClass = false } = {}) => {
     lastReplyTargets.value = selectedSnapshot ? [selectedSnapshot.id] : ['yiming']
     setBubbleFor(lastReplyTargets.value, { text: '', streaming: true, visible: true })
     try {
-      // 课堂手动发言改为直连后端 API，不再经过工作流
+      // 课堂手动发言改为直连后端 API
       const direct = await callClassroomBackendDirect({ proactive: false, content: teacherLine })
       const text = direct && typeof direct === 'object' ? direct.text || '' : String(direct || '')
       const initialIds = [...lastReplyTargets.value]

@@ -1,7 +1,7 @@
 /**
  * 对话 / 课堂 / 报告 网络层
- * - 默认不在此文件写死腾讯云地址；由 `src/classroom-workflow-inject.js` 注入 proxyUrl（推荐：同源或 VITE_BACKEND_BASE_URL 后端）。
- * - 旧版直连腾讯云 qbot SSE 仅作兼容：需在 .env 中显式配置 VITE_SPECIAL_ENDPOINT 等（勿把密钥提交到 Git）。
+ * - 请求 URL 由 `src/classroom-workflow-inject.js` 注入（推荐：`VITE_BACKEND_BASE_URL` 同源或完整后端地址）。
+ * - 未配置统一后端时，可通过 VITE_SPECIAL_* / VITE_CLASSROOM_* 自行指定 endpoint（勿把密钥提交到 Git）。
  */
 import {
   deepExtractAssistantDialogFromObject,
@@ -10,41 +10,40 @@ import {
 } from '../../../src/extractCompletionDialog.js';
 
 const WORKFLOW_CONFIG = {
-  /** 直连上游 SSE（已关闭默认）；请使用注入的 proxyUrl 或配置 VITE_BACKEND_BASE_URL */
+  /** 直连上游（可选）；通常使用注入的 proxyUrl（VITE_BACKEND_BASE_URL） */
   endpoint: '',
 
-  // 应用密钥（bot_app_key）：勿写入仓库；后端代理模式下留空，由 `classroom-workflow-inject` 注入 apiKey 走 Authorization
+  /** 遗留：历史注入可能仍写入；当前 JSON 请求体不再发送 bot_app_key */
   botAppKey: '',
 
-  /** 可选：与后端约定的 Bearer Token（VITE_BACKEND_API_KEY） */
+  /** 可选：Bearer Token（VITE_BACKEND_API_KEY） */
   apiKey: '',
 
-  // 访客 ID，2-64 位，仅 [a-zA-Z0-9_-]
+  /** 可选访客标识；非空时写入请求体 visitor_id */
   visitorBizId: 'teacher-001',
 
-  // 是否启用工作流：enable | disable（若应用未配置工作流可改为 disable）
+  /** 遗留：注入可合并，请求体不再使用 */
   workflowStatus: 'enable',
 
-  // 可选：本地代理地址，解决浏览器跨域时填写（后端转发到腾讯云 SSE 接口）
+  /** 专项对话 POST 地址 */
   proxyUrl: '',
 
-  // 为 true 时关闭本地预设学生回复，仅展示工作流返回（工作流无返回时界面会只有老师气泡）；为 false 时先显示本地学生回复，工作流返回后也会追加智能体气泡
+  // 为 true 时关闭本地预设学生回复，仅展示后端智能体返回
   disableLocalReply: true,
 
-  // 为 true 时在控制台输出详细调试日志（F12 -> Console，筛选 [Workflow]）
+  // 为 true 时输出调试日志（Console 筛选 [SpecialChat]）
   debug: true,
 
-  // 专项模拟是否自动回填“学生回复”气泡（false=仅更新右侧看板）
+  // 专项模拟是否自动回填「学生回复」气泡
   autoAppendReply: true,
 
-  /** true：请求 Accept 为 JSON，请求体 stream=disable，且不再解析 SSE（由注入/VITE_BACKEND_USE_JSON_RESPONSE 控制） */
+  /** true：Accept application/json，stream=disable，按 JSON 解析 */
   preferJsonResponse: false,
 };
 
-// 训练报告：默认走直连 HTTP API（见 sendTrainingReport）；以下为历史工作流字段，保留兼容注入
+// 训练报告：HTTP API（见 sendTrainingReport）；以下为遗留注入字段
 const REPORT_WORKFLOW_CONFIG = {
   endpoint: WORKFLOW_CONFIG.endpoint,
-  // 历史工作流报告 Bot；勿写入仓库。需要时由 __REPORT_WORKFLOW_INJECT__.botAppKey（VITE_REPORT_BOT_APP_KEY）注入
   botAppKey: '',
   apiKey: '',
   visitorBizId: WORKFLOW_CONFIG.visitorBizId,
@@ -66,9 +65,8 @@ const REPORT_WORKFLOW_CONFIG = {
 };
 
 /**
- * 课堂模拟专用 Bot（与专项模拟的 WORKFLOW_CONFIG.botAppKey 分离）
- * - 密钥通过 Vite：在 import workflow 之前注入 window.__CLASSROOM_WORKFLOW_INJECT__（见 src/classroom-workflow-inject.js）
- * - 控制台调试：F12 过滤 [ClassroomWorkflow]
+ * 课堂模拟对话配置（在 import workflow 之前由 classroom-workflow-inject 注入）
+ * - 控制台调试：F12 过滤 [Classroom]
  */
 const CLASSROOM_WORKFLOW_CONFIG = {
   endpoint: WORKFLOW_CONFIG.endpoint,
@@ -94,7 +92,7 @@ function _mergeWorkflowInjectInto(config, inj, logPrefix) {
     }
     if (inj.proxyUrl) config.proxyUrl = inj.proxyUrl;
     if (inj.endpoint) config.endpoint = inj.endpoint;
-    if (inj.workflowStatus) config.workflowStatus = inj.workflowStatus;
+    if (inj.workflowStatus) config.workflowStatus = inj.workflowStatus; // 遗留，不参与请求体
     if (typeof inj.autoAppendReply === 'boolean' && Object.prototype.hasOwnProperty.call(config, 'autoAppendReply')) {
       config.autoAppendReply = inj.autoAppendReply;
     }
@@ -108,9 +106,9 @@ function _mergeWorkflowInjectInto(config, inj, logPrefix) {
 
 (function mergeWorkflowInjects() {
   if (typeof window === 'undefined') return;
-  _mergeWorkflowInjectInto(WORKFLOW_CONFIG, window.__WORKFLOW_INJECT__, 'Workflow');
-  _mergeWorkflowInjectInto(REPORT_WORKFLOW_CONFIG, window.__REPORT_WORKFLOW_INJECT__, 'ReportWorkflow');
-  _mergeWorkflowInjectInto(CLASSROOM_WORKFLOW_CONFIG, window.__CLASSROOM_WORKFLOW_INJECT__, 'ClassroomWorkflow');
+  _mergeWorkflowInjectInto(WORKFLOW_CONFIG, window.__WORKFLOW_INJECT__, 'SpecialChat');
+  _mergeWorkflowInjectInto(REPORT_WORKFLOW_CONFIG, window.__REPORT_WORKFLOW_INJECT__, 'Report');
+  _mergeWorkflowInjectInto(CLASSROOM_WORKFLOW_CONFIG, window.__CLASSROOM_WORKFLOW_INJECT__, 'Classroom');
   try {
     const inj = window.__REPORT_WORKFLOW_INJECT__;
     if (inj && typeof inj === 'object') {
@@ -175,14 +173,12 @@ function _appendReportChatCompletionOptions(body, cfg, meta) {
 
 function _wfClassroomLog() {
   if (CLASSROOM_WORKFLOW_CONFIG.debug && window.console && console.log) {
-    console.log.apply(console, ['[ClassroomWorkflow]'].concat(Array.from(arguments)));
+    console.log.apply(console, ['[Classroom]'].concat(Array.from(arguments)));
   }
 }
 
 /**
- * 本轮对话结束后在控制台打印「最终」工作流 JSON（仅一条，需开启对应 debug）
- * - 若 finalText 本身是完整 JSON 字符串，优先 parse 后输出；
- * - 否则输出 SSE 流中最后一帧有效 data JSON（通常为含 choices / x-debug 的帧）。
+ * 本轮对话结束后在控制台打印最终 JSON（仅一条，需开启对应 debug）
  */
 function _logFinalConversationWorkflowJson(isClassroom, lastSsePayload, finalTextStr) {
   try {
@@ -205,14 +201,14 @@ function _logFinalConversationWorkflowJson(isClassroom, lastSsePayload, finalTex
     }
     if (!obj || typeof obj !== 'object') return;
 
-    const label = isClassroom ? '[ClassroomWorkflow]' : '[Workflow]';
-    console.log(label + ' 最终对话工作流 JSON', obj);
+    const label = isClassroom ? '[Classroom]' : '[SpecialChat]';
+    console.log(label + ' 最终响应 JSON', obj);
   } catch (_) {}
 }
 
 function _wfLog() {
   if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-    console.log.apply(console, ['[Workflow]'].concat(Array.from(arguments)));
+    console.log.apply(console, ['[SpecialChat]'].concat(Array.from(arguments)));
   }
 }
 
@@ -227,7 +223,7 @@ function appendWorkflowReplyToDialog(str, replyId) {
   if (!str || typeof str !== 'string') return;
   const container = document.getElementById('chat-messages');
   if (!container) {
-    console.warn('[Workflow] 兜底写入失败：#chat-messages 不存在');
+    console.warn('[SpecialChat] 兜底写入失败：#chat-messages 不存在');
     return;
   }
   const id = replyId || 'workflow-reply-' + Date.now();
@@ -298,7 +294,7 @@ function _maybeUpdateEmotionFromJsonText(jsonText) {
   // 在前端终端中输出一次本次情绪解析与可视化结果
   try {
     console.log(
-      '[Workflow] 情绪可视化更新:',
+      '[SpecialChat] 情绪可视化更新:',
       'joy =', Math.round(mapped.joy),
       'activation =', Math.round(mapped.activation),
       'anxiety =', Math.round(mapped.anxiety),
@@ -317,12 +313,12 @@ function _maybeUpdateEmotionFromJsonText(jsonText) {
       window.EmotionDashboard.updateBars(mapped);
       window.EmotionDashboard.pushHistory(mapped);
     } catch (e) {
-      console.warn('[Workflow] EmotionDashboard update failed:', e);
+      console.warn('[SpecialChat] EmotionDashboard update failed:', e);
     }
   }
 }
 
-// 从工作流返回的 JSON 文本中同时提取「对话回复」与情绪信息
+// 从接口返回的 JSON 文本中同时提取「对话回复」与情绪信息
 // JSON 形如：
 // {
 //   "choices":[{"message":{"content":"……","role":"assistant"}}],
@@ -366,7 +362,7 @@ function _extractDialogAndEmotionFromContent(jsonText) {
 
     try {
       console.log(
-        '[Workflow] 情绪可视化更新:',
+        '[SpecialChat] 情绪可视化更新:',
         'joy =', Math.round(mapped.joy),
         'activation =', Math.round(mapped.activation),
         'anxiety =', Math.round(mapped.anxiety),
@@ -451,7 +447,7 @@ function _extractDialogAndEmotionFromContent(jsonText) {
               traits: baseTraits,
             });
           } catch (e) {
-            console.warn('[Workflow] updateRadarChart with dynamic traits failed:', e);
+            console.warn('[SpecialChat] updateRadarChart with dynamic traits failed:', e);
           }
         }
       }
@@ -461,7 +457,7 @@ function _extractDialogAndEmotionFromContent(jsonText) {
         window.EmotionDashboard.updateBars(mapped);
         window.EmotionDashboard.pushHistory(mapped);
       } catch (e) {
-        console.warn('[Workflow] EmotionDashboard update failed:', e);
+        console.warn('[SpecialChat] EmotionDashboard update failed:', e);
       }
     }
   }
@@ -505,7 +501,7 @@ function _parseJsonReplyBodyText(rawText) {
 }
 
 /**
- * 按指定 Bot 配置构造 SSE 请求体（与 WORKFLOW_CONFIG 版字段一致）
+ * 构造对话 JSON 请求体（统一后端最小字段集；SSE 时 stream=enable）
  */
 function buildRequestBodyWithConfig(config, client, content, sessionId, customVariables = {}) {
   const sid = client.normalizeSessionId(sessionId);
@@ -513,39 +509,34 @@ function buildRequestBodyWithConfig(config, client, content, sessionId, customVa
   if (requestId.length > 255) requestId = requestId.slice(-255);
   const contentStr = client.ensureUtf8String(content || '');
   const vars = { ...(customVariables || {}) };
-  /** 是否与后端约定：true=生成报告请求，false=普通互动 */
   let evaluation = false;
   if (Object.prototype.hasOwnProperty.call(vars, 'evaluation')) {
     const v = vars.evaluation;
     evaluation = v === true || v === 'true';
     delete vars.evaluation;
   }
-  // 兼容旧拼写 evalution → 仍映射到顶层 evaluation
   if (Object.prototype.hasOwnProperty.call(vars, 'evalution')) {
     const v = vars.evalution;
     if (v === true || v === 'true') evaluation = true;
     delete vars.evalution;
   }
   const model = vars.model ? client.ensureUtf8String(vars.model) : '';
+  if (Object.prototype.hasOwnProperty.call(vars, 'model')) delete vars.model;
+
   const body = {
     request_id: requestId,
+    session_id: sid,
     content: contentStr,
     message: contentStr,
-    session_id: sid,
-    bot_app_key: config.botAppKey,
-    visitor_biz_id: client.ensureUtf8String(config.visitorBizId).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'classroom_001',
-    incremental: true,
-    streaming_throttle: 10,
-    visitor_labels: [],
     evaluation,
     custom_variables: client.stringifyCustomVariables(vars),
-    search_network: 'disable',
     stream: config.preferJsonResponse ? 'disable' : 'enable',
-    workflow_status: config.workflowStatus,
-    tcadp_user_id: '',
   };
-  if (model) {
-    body.model = model;
+  if (model) body.model = model;
+  const vidRaw = (config.visitorBizId && String(config.visitorBizId).trim()) || '';
+  if (vidRaw) {
+    const vid = client.ensureUtf8String(vidRaw).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    if (vid) body.visitor_id = vid;
   }
   return body;
 }
@@ -574,7 +565,7 @@ const WorkflowClient = {
   },
 
   /**
-   * 保证发往工作流的字符串为 UTF-8 可正确编码的 Unicode 字符串（NFC 规范化，避免乱码）
+   * 保证发往接口的字符串为 UTF-8 可正确编码的 Unicode 字符串（NFC 规范化，避免乱码）
    */
   ensureUtf8String(str) {
     if (str == null) return '';
@@ -584,7 +575,7 @@ const WorkflowClient = {
 
   /**
    * 构造 HTTP SSE 请求体（与文档 1.1 一致），统一 UTF-8 编码
-   * - model 保留在 custom_variables.model，便于工作流在「开始」节点里从自定义变量读取
+   * - model 可放在 custom_variables.model，由后端读取
    *   （若需要，也会额外复制一份到顶层 body.model，兼容后端其它使用方式）
    */
   buildRequestBody(content, sessionId, customVariables = {}) {
@@ -699,20 +690,20 @@ const WorkflowClient = {
 
               if (type === 'error' || eventType === 'error') {
                 const err = payload.error || (p && (p.error || p));
-                const errObj = err && typeof err === 'object' ? err : { message: String(err || '工作流调用出错') };
+                const errObj = err && typeof err === 'object' ? err : { message: String(err || '智能体调用出错') };
                 hadError = true;
                 eventCount++;
-                const msg = errObj.message || errObj.msg || '工作流调用出错';
+                const msg = errObj.message || errObj.msg || '智能体调用出错';
                 dbg('SSE 收到 error:', msg);
                 if (isClassroom) {
-                  console.warn('[ClassroomWorkflow] SSE error:', msg);
+                  console.warn('[Classroom] SSE error:', msg);
                   try {
                     if (window.ClassroomWorkflowHooks && typeof window.ClassroomWorkflowHooks.onSystem === 'function') {
-                      window.ClassroomWorkflowHooks.onSystem('⚠️ 工作流错误：' + msg);
+                      window.ClassroomWorkflowHooks.onSystem('⚠️ 智能体错误：' + msg);
                     }
                   } catch (_) {}
                 } else if (window.ChatEngine && typeof ChatEngine.addSystemMessage === 'function') {
-                  ChatEngine.addSystemMessage('⚠️ 工作流错误：' + msg);
+                  ChatEngine.addSystemMessage('⚠️ 智能体错误：' + msg);
                 }
                 continue;
               }
@@ -725,7 +716,7 @@ const WorkflowClient = {
 
               lastWorkflowSsePayload = payload;
 
-              // 优先从工作流返回的 JSON 文本中提取对话与情绪（choices[..].message.content + x-debug）
+              // 优先从返回的 JSON 文本中提取对话与情绪（choices[..].message.content + x-debug）
               const rawCandidate =
                 (p && typeof p.content === 'string' ? p.content : '') ||
                 (payload && typeof payload.content === 'string' ? payload.content : '') ||
@@ -789,7 +780,7 @@ const WorkflowClient = {
                       window.ClassroomWorkflowHooks.onDelta(toShow, { replyId, rawEvent: eventType || type });
                     }
                   } catch (e) {
-                    console.warn('[ClassroomWorkflow] onDelta 失败:', e);
+                    console.warn('[Classroom] onDelta 失败:', e);
                   }
                 } else if (window.ChatEngine && typeof window.ChatEngine.addWorkflowReply === 'function') {
                   window.ChatEngine.addWorkflowReply(toShow, replyId);
@@ -815,11 +806,11 @@ const WorkflowClient = {
           window.ClassroomWorkflowHooks.onFinalize(finalText || '', { replyId, hadError, eventCount });
         }
       } catch (e) {
-        console.warn('[ClassroomWorkflow] onFinalize 失败:', e);
+        console.warn('[Classroom] onFinalize 失败:', e);
       }
     }
     if (finalText) {
-      dbg('工作流回复完成，总长度:', finalText.length);
+      dbg('智能体回复完成，总长度:', finalText.length);
       if (!isClassroom && eventCount === 0) {
         _wfLog('兜底：有内容但未写入过，直接追加到主对话区');
         appendWorkflowReplyToDialog(finalText, replyId);
@@ -835,15 +826,15 @@ const WorkflowClient = {
     } else if (!hadError) {
       dbg('未收到任何 reply 内容');
       if (isClassroom) {
-        console.warn('[ClassroomWorkflow] 未收到回复，请检查应用发布与跨域/代理');
+        console.warn('[Classroom] 未收到回复，请检查应用发布与跨域/代理');
         try {
           if (window.ClassroomWorkflowHooks && typeof window.ClassroomWorkflowHooks.onSystem === 'function') {
-            window.ClassroomWorkflowHooks.onSystem('⚠️ 工作流未返回内容，请检查应用是否已发布及网络/跨域（可配置 proxyUrl）。');
+            window.ClassroomWorkflowHooks.onSystem('⚠️ 智能体未返回内容，请检查后端服务与网络/跨域（可配置 proxyUrl）。');
           }
         } catch (_) {}
       } else if (chat && typeof chat.addSystemMessage === 'function') {
         _wfLog('未收到任何 reply 内容，提示用户');
-        chat.addSystemMessage('⚠️ 工作流未返回内容，请检查：1）应用是否已发布 2）控制台/网络是否有跨域或错误');
+        chat.addSystemMessage('⚠️ 智能体未返回内容，请检查：1）后端是否可用 2）控制台/网络是否有跨域或错误');
       }
     }
 
@@ -857,7 +848,7 @@ const WorkflowClient = {
    */
   async sendTeacherMessageToWorkflow(sessionId, message, extra = {}) {
     const url = WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint;
-    _wfLog('前端准备连接工作流', '请求地址:', url, 'sessionId:', sessionId, '内容前20字:', String(message).slice(0, 20));
+    _wfLog('准备请求对话接口', '请求地址:', url, 'sessionId:', sessionId, '内容前20字:', String(message).slice(0, 20));
     if (!url) {
       _wfLog('未配置 endpoint/proxyUrl，已跳过');
       return null;
@@ -876,7 +867,7 @@ const WorkflowClient = {
         ...extra,
       });
       if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-        console.log('[前端发送] 专项工作流请求 JSON', body);
+        console.log('[前端发送] 专项对话请求 JSON', body);
       }
       _wfLog('fetch 开始 POST', url, 'body.session_id:', body.session_id, 'body.content 长度:', body.content.length);
 
@@ -897,11 +888,11 @@ const WorkflowClient = {
       _wfLog('fetch 响应 status:', res.status, 'Content-Type:', res.headers.get('Content-Type'));
       if (!res.ok) {
         const text = await res.text();
-        let errMsg = '工作流后端暂不可用（' + res.status + '）';
+        let errMsg = '对话服务暂不可用（' + res.status + '）';
         try {
           const j = JSON.parse(text);
           if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-            console.log('[Workflow] HTTP 错误响应 JSON', { status: res.status }, j);
+            console.log('[SpecialChat] HTTP 错误响应 JSON', { status: res.status }, j);
           }
           if (j.error && j.error.message) errMsg = j.error.message;
           else if (j.message) errMsg = j.message;
@@ -912,7 +903,7 @@ const WorkflowClient = {
         if (chat && typeof chat.addSystemMessage === 'function') {
           chat.addSystemMessage('⚠️ ' + errMsg);
         }
-        console.warn('[Workflow] HTTP', res.status, errMsg);
+        console.warn('[SpecialChat] HTTP', res.status, errMsg);
         return null;
       }
 
@@ -921,12 +912,12 @@ const WorkflowClient = {
         _wfLog('JSON 模式响应，body 前 200 字:', text.slice(0, 200));
         const toShow = _parseJsonReplyBodyText(text);
         if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-          console.log('[Workflow] JSON 模式解析后长度:', (toShow || '').length);
+          console.log('[SpecialChat] JSON 模式解析后长度:', (toShow || '').length);
         }
         if (toShow && chat && typeof chat.addWorkflowReply === 'function') {
           chat.addWorkflowReply(toShow, replyId);
         } else if (chat && typeof chat.addSystemMessage === 'function') {
-          chat.addSystemMessage('⚠️ 工作流返回格式异常，请确认后端返回 JSON。');
+          chat.addSystemMessage('⚠️ 返回格式异常，请确认后端返回 JSON。');
         }
         if (chat && typeof chat.finalizeWorkflowReply === 'function') {
           chat.finalizeWorkflowReply(replyId);
@@ -941,7 +932,7 @@ const WorkflowClient = {
       if (!res.body) {
         _wfLog('响应无 body');
         if (chat && typeof chat.addSystemMessage === 'function') {
-          chat.addSystemMessage('⚠️ 工作流返回为空，请检查应用是否已发布。');
+          chat.addSystemMessage('⚠️ 智能体返回为空，请检查后端是否可用。');
         }
         return null;
       }
@@ -954,7 +945,7 @@ const WorkflowClient = {
           try {
             const j = JSON.parse(text);
             if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-              console.log('[Workflow] 非 SSE 响应 JSON', { status: res.status, contentType }, j);
+              console.log('[SpecialChat] 非 SSE 响应 JSON', { status: res.status, contentType }, j);
             }
             const v = j.text || j.content || (j.payload && (j.payload.text || j.payload.content)) || j.reply || j.message;
             toShow = typeof v === 'string' ? v : JSON.stringify(j, null, 2);
@@ -964,7 +955,7 @@ const WorkflowClient = {
           _wfLog('非 SSE 响应，写入主对话区，长度:', toShow.length);
           chat.addWorkflowReply(toShow);
         } else if (chat && typeof chat.addSystemMessage === 'function') {
-          chat.addSystemMessage('⚠️ 工作流返回格式异常，请确认接口地址与 AppKey。');
+          chat.addSystemMessage('⚠️ 返回格式异常，请确认接口地址与鉴权配置。');
         }
         return toShow || null;
       }
@@ -981,9 +972,9 @@ const WorkflowClient = {
         const hint = (msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('NetworkError') >= 0)
           ? '请检查网络或跨域（CORS）。即使 Network 里能看到接口返回，CORS 也会导致前端拿不到响应体，必须用后端代理（配置 proxyUrl）。'
           : msg;
-        chat.addSystemMessage('⚠️ 工作流连接失败：' + hint);
+        chat.addSystemMessage('⚠️ 连接失败：' + hint);
       }
-      console.warn('[Workflow] sendTeacherMessageToWorkflow failed:', e);
+      console.warn('[SpecialChat] sendTeacherMessageToWorkflow failed:', e);
       return null;
     } finally {
       WorkflowClient._workflowLoading = false;
@@ -997,7 +988,7 @@ const WorkflowClient = {
    * 文本对话消息（老师 / 学生）
    */
   async sendTextMessage(sessionId, role, message, extra = {}) {
-    // 目前只对「老师」消息触发智能体工作流；学生消息仅作为仿真展示
+    // 目前只对「老师」消息触发智能体接口；学生消息仅作为仿真展示
     if (role === 'teacher') {
       return this.sendTeacherMessageToWorkflow(sessionId, message, extra);
     }
@@ -1006,7 +997,7 @@ const WorkflowClient = {
 
   /**
    * 课堂模拟：广播/对生发言 → 独立 Bot（CLASSROOM_WORKFLOW_CONFIG.botAppKey）
-   * - 调试：浏览器 F12 控制台过滤 [ClassroomWorkflow]
+   * - 调试：浏览器 F12 控制台过滤 [Classroom]
    * - UI：可挂载 window.ClassroomWorkflowHooks（onDelta / onFinalize / onSystem）
    */
   async sendClassroomBroadcast(sessionId, message, extra = {}) {
@@ -1033,7 +1024,7 @@ const WorkflowClient = {
       // 仅课堂模拟：支持主动轮询标记（专项模拟不使用此字段）
       body.proactive = extra && extra.proactive === true;
       if (config.debug && window.console && console.log) {
-        console.log('[前端发送] 课堂工作流请求 JSON', body);
+        console.log('[前端发送] 课堂对话请求 JSON', body);
       }
       _wfClassroomLog('POST body 摘要:', {
         session_id: body.session_id,
@@ -1055,18 +1046,18 @@ const WorkflowClient = {
 
       if (!res.ok) {
         const text = await res.text();
-        let errMsg = '工作流暂不可用（' + res.status + '）';
+        let errMsg = '课堂对话暂不可用（' + res.status + '）';
         try {
           const j = JSON.parse(text);
           if (CLASSROOM_WORKFLOW_CONFIG.debug && window.console && console.log) {
-            console.log('[ClassroomWorkflow] HTTP 错误响应 JSON', { status: res.status }, j);
+            console.log('[Classroom] HTTP 错误响应 JSON', { status: res.status }, j);
           }
           if (j.error && j.error.message) errMsg = j.error.message;
           else if (j.message) errMsg = j.message;
         } catch (_) {
           if (text) errMsg = text.slice(0, 200);
         }
-        console.warn('[ClassroomWorkflow] HTTP 错误:', errMsg);
+        console.warn('[Classroom] HTTP 错误:', errMsg);
         try {
           if (window.ClassroomWorkflowHooks && typeof window.ClassroomWorkflowHooks.onSystem === 'function') {
             window.ClassroomWorkflowHooks.onSystem('⚠️ ' + errMsg);
@@ -1095,7 +1086,7 @@ const WorkflowClient = {
       if (!res.body) {
         try {
           if (window.ClassroomWorkflowHooks && typeof window.ClassroomWorkflowHooks.onSystem === 'function') {
-            window.ClassroomWorkflowHooks.onSystem('⚠️ 工作流返回为空');
+            window.ClassroomWorkflowHooks.onSystem('⚠️ 智能体返回为空');
           }
         } catch (_) {}
         return null;
@@ -1110,7 +1101,7 @@ const WorkflowClient = {
           try {
             const j = JSON.parse(text);
             if (CLASSROOM_WORKFLOW_CONFIG.debug && window.console && console.log) {
-              console.log('[ClassroomWorkflow] 非 SSE 响应 JSON', { status: res.status, contentType }, j);
+              console.log('[Classroom] 非 SSE 响应 JSON', { status: res.status, contentType }, j);
             }
             const fromChat =
               dialogFromCompletionObj(j) ||
@@ -1151,14 +1142,14 @@ const WorkflowClient = {
       return finalText;
     } catch (e) {
       const msg = e && e.message ? e.message : String(e);
-      console.warn('[ClassroomWorkflow] sendClassroomBroadcast 异常:', e);
+      console.warn('[Classroom] sendClassroomBroadcast 异常:', e);
       try {
         if (window.ClassroomWorkflowHooks && typeof window.ClassroomWorkflowHooks.onSystem === 'function') {
           const hint =
             msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('NetworkError') >= 0
               ? '网络或 CORS：可配置 CLASSROOM_WORKFLOW_CONFIG.proxyUrl / Vite 注入的 proxyUrl 走后端代理。'
               : msg;
-          window.ClassroomWorkflowHooks.onSystem('⚠️ 课堂工作流：' + hint);
+          window.ClassroomWorkflowHooks.onSystem('⚠️ 课堂对话：' + hint);
         }
       } catch (_) {}
       return null;
@@ -1166,7 +1157,7 @@ const WorkflowClient = {
   },
 
   /**
-   * 人格切换：仅向工作流发送 model，不在主对话框里展示
+   * 人格切换：仅向对话接口发送 model，不在主对话框里展示
    * - modelName 使用中文，如「习得性无助型」「注意力分散型」
    */
   async sendModelSwitch(sessionId, modelName) {
@@ -1196,11 +1187,11 @@ const WorkflowClient = {
       });
       const text = await res.text();
       if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-        console.log('[Workflow] 人格切换完成，status =', res.status, 'model =', modelName);
+        console.log('[SpecialChat] 人格切换完成，status =', res.status, 'model =', modelName);
       }
       return text;
     } catch (e) {
-      console.warn('[Workflow] sendModelSwitch failed:', e);
+      console.warn('[SpecialChat] sendModelSwitch failed:', e);
       return null;
     }
   },
@@ -1210,7 +1201,7 @@ const WorkflowClient = {
    * - audioPayload 可以是录音后的 URL、Base64、或你约定的标识
    */
   async sendAudioMessage(sessionId, role, transcript, audioPayload, extra = {}) {
-    // 语音消息可通过 custom_variables 传递给工作流（此处仅做占位，方便后续扩展）
+    // 语音消息可通过 custom_variables 传递给后端（此处仅做占位，方便后续扩展）
     if (role === 'teacher') {
       const content = transcript || '[语音消息]';
       return this.sendTeacherMessageToWorkflow(sessionId, content, {
@@ -1317,7 +1308,7 @@ const WorkflowClient = {
 };
 
 /**
- * 工作流返回数据存储：存到内存 + localStorage，支持导出为 JSON 文件
+ * 对话接口记录：内存 + localStorage，可导出 JSON
  */
 const WORKFLOW_DATA_KEY = 'workflow_history_data';
 const WORKFLOW_DATA_MAX = 500;
@@ -1340,7 +1331,7 @@ const WorkflowDataStore = {
     try {
       localStorage.setItem(WORKFLOW_DATA_KEY, JSON.stringify(this._list));
     } catch (e) {
-      console.warn('[Workflow] localStorage save failed', e);
+      console.warn('[SpecialChat] localStorage save failed', e);
     }
   },
 
@@ -1394,7 +1385,7 @@ window.WORKFLOW_CONFIG = WORKFLOW_CONFIG;
 window.CLASSROOM_WORKFLOW_CONFIG = CLASSROOM_WORKFLOW_CONFIG;
 window.WorkflowDataStore = WorkflowDataStore;
 
-_wfLog('工作流模块已加载，请求地址:', WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint, 'debug:', WORKFLOW_CONFIG.debug);
+_wfLog('对话模块已加载，请求地址:', WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint, 'debug:', WORKFLOW_CONFIG.debug);
 _wfLog(
   '专项对话:',
   WORKFLOW_CONFIG.preferJsonResponse ? 'JSON 单次响应（Accept: application/json，stream=disable）' : 'SSE（Accept: text/event-stream）'

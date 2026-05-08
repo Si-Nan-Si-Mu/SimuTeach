@@ -8,9 +8,10 @@
 
 ## 近期变更摘要（后端接入）
 
-- **统一后端**：在 `.env.local` 配置 `VITE_BACKEND_BASE_URL`（及可选 `VITE_BACKEND_API_KEY`）后，专项对话、课堂对话、训练报告、文档分析请求均发往该前缀下的路径（默认 `/simu/special/chat`、`/simu/classroom/chat`、`/simu/report`、`/simu/doc/chat`，均可覆盖）。详见 **`src/classroom-workflow-inject.js`**。
-- **默认 JSON、取消 SSE**：配置统一后端且 **未** 将 `VITE_BACKEND_USE_JSON_RESPONSE` 设为 `false` 时，对话类请求使用 `Accept: application/json`，请求体中 `stream: disable`，响应按 **单次 JSON** 解析（含 Chat Completions 形与 `x-debug` 情绪字段）。需要兼容腾讯云式流式时再设 `VITE_BACKEND_USE_JSON_RESPONSE=false`。实现见 **`vendor/front/js/workflow.js`**。
-- **对接规范**：后端可自行实现路由与鉴权，与前端约定见 **`docs/BACKEND_INTEGRATION_SPEC.md`**（请求体字段、`Authorization`、响应形状等）。
+- **统一后端**：在 `.env.local` 配置 `VITE_BACKEND_BASE_URL`（及可选 `VITE_BACKEND_API_KEY`）后，专项、课堂、报告、文档请求均发往该前缀；默认路径见 **`docs/BACKEND_INTEGRATION_SPEC.md` §9**（文档分析默认 **一步** `POST …/simu/doc/analyze`，不仅限于 `/simu/doc/chat`）。URL 拼接见 **`src/classroom-workflow-inject.js`**。
+- **默认 JSON、可选 SSE**：配置统一后端且 **未** 将 `VITE_BACKEND_USE_JSON_RESPONSE` 设为 `false` 时，对话类请求为 `Accept: application/json`、`stream: disable`，响应按 **单次 JSON** 解析（含 Chat Completions 形与 `x-debug` 情绪）。需要流式时设为 `false`。实现见 **`vendor/front/js/workflow.js`**。
+- **对接规范**：最小请求体、鉴权与响应约定见 **`docs/BACKEND_INTEGRATION_SPEC.md`**（建议后端先读该文档开头的「三步」）。
+- **本地报告代理**：未接统一后端、且开发环境要用同源 `/api/report` 时，需在 `.env.local` 配置 **`VITE_REPORT_PROXY_TARGET`**，否则请在规范文档 §10 指引下改用 **`VITE_REPORT_HTTP_URL`**。
 
 ---
 
@@ -18,7 +19,7 @@
 
 | 文档 | 用途 |
 |------|------|
-| [**`docs/BACKEND_INTEGRATION_SPEC.md`**](docs/BACKEND_INTEGRATION_SPEC.md) | **后端配置与数据交互规范**（路径、JSON/SSE 开关、qbot 形请求体、报告接口） |
+| [**`docs/BACKEND_INTEGRATION_SPEC.md`**](docs/BACKEND_INTEGRATION_SPEC.md) | **后端配置与数据交互规范**（路径、JSON/SSE 开关、最小对话 JSON、报告接口） |
 | [`docs/前端方案说明书.md`](docs/前端方案说明书.md) | 交付与评审：架构、能力、与后端协作要点 |
 | [`docs/mindmap-rendering-architecture.md`](docs/mindmap-rendering-architecture.md) | 教学文档分析：思维导图数据流、ECharts 树图与 Markdown/PDF/JSON 导出 |
 | [`docs/SimuTeach-实际系统架构.md`](docs/SimuTeach-实际系统架构.md) | 系统架构与模块关系（纲要） |
@@ -30,7 +31,7 @@
 
 ### 专项模拟
 
-- 教师消息优先走工作流，失败时可按配置使用本地策略兜底。
+- 教师消息优先走后端对话接口，失败时可按配置使用本地策略兜底。
 - 快捷语驱动路径分析统计（鼓励 / 安抚 / 互动 / 提问 / 批评）。
 - 情绪看板按角色隔离，切换人格时可恢复对应上下文。
 - **能力维度与角色对应**（与课堂报告、侧栏副标题一致，定义见 `src/constants/specialTrainingFocus.js`）：
@@ -46,7 +47,7 @@
 
 ### 教学文档分析
 
-- 拖拽 / 选择上传，多文件累计与去重；类型与大小限制见下文「上传规则」。
+- 拖拽 / 选择上传，多文件累计与去重；类型与大小限制见下文「上传规则」。已配置 **`VITE_BACKEND_BASE_URL`** 时，默认 **一步**：`POST` **`{BASE}/simu/doc/analyze`**，`multipart` 字段 **`file`**（及可选 `message` 等），直接返回分析 JSON；**不需要**存储凭证。若设 **`VITE_BACKEND_DOC_SINGLE_STEP=false`** 则改为先上传再分析，见 **`docs/BACKEND_INTEGRATION_SPEC.md` 第 5 节**。
 - 分析结果弹窗：思维导图、教学诊断、执行画像（部分区块默认折叠）。思维导图（ECharts 树图）在 canvas 上使用**与设计 token 一致的实色字线**，避免 `var()` 在 canvas 中退成白字难辨。
 - 按文件切换历史报告；调试区可开关，支持原始响应导出。
 - 分析报告下载：**Markdown**、**PDF**（`html2pdf.js`）、**JSON**。
@@ -54,7 +55,7 @@
 ### 侧栏
 
 - 模式：专项模拟 / 课堂模拟 / 教学文档分析；专项下可选三人格学生。
-- **工作流数据** 入口固定在侧栏**底部**（与页脚同区），**不再提供「自定义人格」**侧栏入口（原弹窗与五维滑块已移除）。
+- **接口记录** 入口固定在侧栏**底部**（与页脚同区），**不再提供「自定义人格」**侧栏入口（原弹窗与五维滑块已移除）。
 
 ---
 
@@ -66,7 +67,7 @@
 - 图表：`vendor/front/js/echarts.min.js`（运行时 `<script>` 注入，`window.echarts`）
 - PDF 导出：`html2pdf.js`（npm 依赖，构建时按需分包）
 - 样式：`vendor/front/css/style.css` + 各组件样式（部分页面含全局与 `--app-*` 变量）
-- 与智能体通信：**HTTP JSON**（默认）；可选 **HTTP SSE**（`VITE_BACKEND_USE_JSON_RESPONSE=false` 或未配置统一后端且直连腾讯云时）
+- 与智能体通信：**HTTP JSON**（默认）；可选 **HTTP SSE**（`VITE_BACKEND_USE_JSON_RESPONSE=false` 或未配置统一后端时的遗留直连模式）
 
 ---
 
@@ -129,12 +130,12 @@ npm install
 
 ### 2) 配置环境变量
 
-将 `.env.example` 复制为 `.env.local` 并填写。统一后端至少配置：
+将 `.env.example` 复制为 `.env.local` 并填写。**推荐**至少配置：
 
 - `VITE_BACKEND_BASE_URL` — 如 `http://127.0.0.1:8787` 或同源 `/api`
-- `VITE_BACKEND_API_KEY` — 可选 Bearer
+- `VITE_BACKEND_API_KEY` — 可选；非空则对话与报告等请求带 `Authorization: Bearer …`
 
-完整说明与路径覆盖见 **`.env.example`** 与 **`docs/BACKEND_INTEGRATION_SPEC.md`**。
+可选：`VITE_BACKEND_USE_JSON_RESPONSE=false`（改 SSE）、`VITE_REPORT_PROXY_TARGET`（仅 `npm run dev` 且走 `/api/report` 时）。完整变量表见 **`docs/BACKEND_INTEGRATION_SPEC.md` §1** 与 **`.env.example`**。
 
 ### 3) 启动开发环境
 
@@ -206,7 +207,7 @@ teacher-training-agent/
 ### 根组件（`App.vue`）
 
 - 模式：`special` | `classroom` | `doc-analysis`（`v-show` 切主区，侧栏常驻）。
-- 人格、会话、分桶对话、情绪、报告 `endSession` 等与工作流/报告逻辑协同。
+- 人格、会话、分桶对话、情绪、报告 `endSession` 等与对话客户端及报告逻辑协同。
 - 侧栏宽度与报告遮罩通过 `--app-sidebar-outer` 等协调（见 `SideBar.vue` / `App.vue` 样式）。
 
 ### 关键组件
@@ -218,7 +219,7 @@ teacher-training-agent/
 | `TeachingDocAnalysis.vue` | 文档上传、分析请求、导图、导出 |
 | `EmotionPanel.vue` | 专项情绪与图表 |
 | `ChatBox.vue` | 专项对话与顶栏学生信息 |
-| `SideBar.vue` | 模式、学生、工作流数据（底部） |
+| `SideBar.vue` | 模式、学生、接口记录（底部） |
 
 ---
 
@@ -232,22 +233,23 @@ teacher-training-agent/
 
 ## 调试与排障
 
-浏览器控制台可按前缀过滤，例如：
+浏览器控制台可按前缀过滤（来自 `vendor/front/js/workflow.js` 等）：
 
 | 前缀 | 含义 |
 |------|------|
-| `[Workflow]` | 专项对话客户端 |
-| `[ClassroomWorkflow]` / `[ClassroomProactive]` | 课堂 |
-| `[ReportDirect]` | 报告与弹窗数据 |
+| `[SpecialChat]` | 专项对话请求 / 调试日志 |
+| `[Classroom]` | 课堂广播对话 |
+| `[ClassroomProactive]` | 课堂主动轮询（`ClassroomSim.vue`） |
+| `[ReportAPI]` | 训练报告 HTTP 请求 |
 
-JSON 模式下若解析失败，检查响应是否为合法 JSON 及是否与规范中的字段一致。仍使用 SSE 时优先查网关与 CORS。
+JSON 模式下若解析失败，请对照 **`docs/BACKEND_INTEGRATION_SPEC.md` §6–§7** 检查响应结构。使用 SSE 时另查网关超时与 CORS。
 
 ---
 
 ## 安全说明
 
 - 密钥、API key 仅放 `.env.local` 或 CI 机密，**勿提交**。
-- `window.__*__INJECT__` 等由 `classroom-workflow-inject.js` 在加载工作流前自 `VITE_*` 注入，勿在公开仓库内写死密钥。
+- `window.__*__INJECT__` 由 `classroom-workflow-inject.js` 在加载 `workflow.js` 前从 `VITE_*` 注入，勿在仓库内写死密钥。
 
 ---
 

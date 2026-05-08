@@ -19,39 +19,73 @@ const BACKEND_API_KEY = String(import.meta.env.VITE_BACKEND_API_KEY || '').trim(
 const BACKEND_USE_JSON_RESPONSE =
   !!BACKEND_BASE && import.meta.env.VITE_BACKEND_USE_JSON_RESPONSE !== 'false'
 const BACKEND_PATH_DOC = String(import.meta.env.VITE_BACKEND_PATH_DOC || '/simu/doc/chat').trim()
-/** 走后端时是否仍发送与 qbot 同构的 JSON 请求体（默认 true，便于后端转发腾讯云） */
-const BACKEND_DOC_QBOT_SHAPED_BODY = import.meta.env.VITE_BACKEND_DOC_QBOT_BODY !== 'false'
+const BACKEND_PATH_DOC_UPLOAD = String(import.meta.env.VITE_BACKEND_PATH_DOC_UPLOAD || '/simu/doc/upload').trim()
+const BACKEND_PATH_DOC_STORAGE = String(
+  import.meta.env.VITE_BACKEND_PATH_DOC_STORAGE || '/simu/doc/storage-credential'
+).trim()
+const BACKEND_PATH_DOC_COS_PROXY = String(
+  import.meta.env.VITE_BACKEND_PATH_DOC_COS_PROXY || '/simu/doc/cos-upload'
+).trim()
+/** 一步：multipart 上传并由同一接口返回分析（默认开启，需后端实现该路径） */
+const BACKEND_PATH_DOC_ANALYZE = String(
+  import.meta.env.VITE_BACKEND_PATH_DOC_ANALYZE || '/simu/doc/analyze'
+).trim()
+const BACKEND_DOC_SINGLE_STEP =
+  !!BACKEND_BASE && import.meta.env.VITE_BACKEND_DOC_SINGLE_STEP !== 'false'
+
+/** 调试面板条目标签（与历史「工作流」文案脱钩） */
+const DOC_DEBUG_LABEL_RAW = '接口原始响应'
+const DOC_DEBUG_LABEL_REQ_JSON = '文档分析请求JSON'
+const DOC_DEBUG_LABEL_REQ_PLAIN = '文档分析请求(纯文本URL)'
+const DOC_DEBUG_LABEL_RES_STATUS = '文档分析响应状态'
+
+function joinBackendDocUrl(pathSeg) {
+  const b = BACKEND_BASE
+  const p = String(pathSeg || '').trim()
+  if (!b || !p) return ''
+  return b + (p.startsWith('/') ? p : '/' + p)
+}
+
+/** 显式设为空字符串可走「凭证 + 预签名」链路；未设置且存在 BASE 时默认直传后端 multipart */
+const _rawDocFileUpload = import.meta.env.VITE_DOC_FILE_UPLOAD_URL
+const DOC_FILE_UPLOAD_URL =
+  typeof _rawDocFileUpload === 'string'
+    ? _rawDocFileUpload.trim()
+    : BACKEND_BASE
+      ? joinBackendDocUrl(BACKEND_PATH_DOC_UPLOAD)
+      : ''
+
+const _rawDocStorage = import.meta.env.VITE_DOC_STORAGE_CREDENTIAL_URL
+const DOC_STORAGE_CREDENTIAL_URL =
+  typeof _rawDocStorage === 'string' && _rawDocStorage.trim() !== ''
+    ? _rawDocStorage.trim()
+    : BACKEND_BASE
+      ? joinBackendDocUrl(BACKEND_PATH_DOC_STORAGE)
+      : ''
+
+const _rawDocCosProxy = import.meta.env.VITE_DOC_COS_UPLOAD_PROXY_URL
+const DOC_COS_UPLOAD_PROXY_URL =
+  typeof _rawDocCosProxy === 'string' && _rawDocCosProxy.trim() !== ''
+    ? _rawDocCosProxy.trim()
+    : BACKEND_BASE
+      ? joinBackendDocUrl(BACKEND_PATH_DOC_COS_PROXY)
+      : ''
 
 const DOC_WORKFLOW_API_KEY = import.meta.env.VITE_DOC_WORKFLOW_API_KEY?.trim() || ''
 const DOC_WORKFLOW_AUTHORIZATION = import.meta.env.VITE_DOC_WORKFLOW_AUTHORIZATION?.trim() || ''
 const DOC_WORKFLOW_APP_KEY = import.meta.env.VITE_DOC_BOT_APP_KEY?.trim() || ''
 const DOC_WORKFLOW_ENTRY = import.meta.env.VITE_DOC_WORKFLOW_ENTRY?.trim() || ''
-const DOC_FILE_UPLOAD_URL = import.meta.env.VITE_DOC_FILE_UPLOAD_URL?.trim() || ''
-const DOC_STORAGE_CREDENTIAL_URL =
-  import.meta.env.VITE_DOC_STORAGE_CREDENTIAL_URL?.trim() || '/api/describe-storage-credential'
 const DOC_STORAGE_BOT_BIZ_ID = import.meta.env.VITE_DOC_STORAGE_BOT_BIZ_ID?.trim() || ''
-const DOC_COS_UPLOAD_PROXY_URL = import.meta.env.VITE_DOC_COS_UPLOAD_PROXY_URL?.trim() || '/api/cos-upload'
-// qbot SSE 请求体与 vendor/front/js/workflow.js buildRequestBodyWithConfig 对齐（专项模拟同类字段）
+// 文档分析 custom_variables / visitor 等与 vendor/front/js/workflow.js 专项对话字段风格一致
 const DOC_SSE_VISITOR_BIZ_ID =
   import.meta.env.VITE_DOC_VISITOR_BIZ_ID?.trim() || 'teacher-001'
 const DOC_SSE_ROLE = import.meta.env.VITE_DOC_SSE_ROLE?.trim() || 'teacher'
 const DOC_SSE_TRIGGER = import.meta.env.VITE_DOC_SSE_TRIGGER?.trim() || '互动'
 const DOC_SSE_CHARACTER_ID = import.meta.env.VITE_DOC_SSE_CHARACTER_ID?.trim() || ''
 const DOC_SSE_MODEL_NAME = import.meta.env.VITE_DOC_SSE_MODEL_NAME?.trim() || ''
-const DOC_QBOT_SSE_WORKFLOW_STATUS =
-  import.meta.env.VITE_DOC_WORKFLOW_STATUS?.trim() || 'enable'
 
-/** 已关闭浏览器直连腾讯云；未配置 BACKEND_BASE 时返回空，需显式配置 VITE_DOC_WORKFLOW_ENDPOINT 或后端 */
+/** 未配置 BACKEND_BASE 时无默认云端地址；请设置 VITE_BACKEND_BASE_URL 或 VITE_DOC_WORKFLOW_ENDPOINT */
 function getQbotSseFallbackUrl() {
-  return ''
-}
-
-function getDocBotAppKey() {
-  if (DOC_WORKFLOW_APP_KEY) return DOC_WORKFLOW_APP_KEY
-  if (typeof window !== 'undefined' && window.WORKFLOW_CONFIG?.botAppKey) {
-    const k = String(window.WORKFLOW_CONFIG.botAppKey).trim()
-    if (k) return k
-  }
   return ''
 }
 
@@ -185,7 +219,7 @@ function getLatestLogByLabel(label) {
 function resolveWorkflowRawForExport() {
   const r = activeFileReport.value
   if (r?.workflowRawText && String(r.workflowRawText).trim()) return r.workflowRawText
-  const hit = getLatestLogByLabel('工作流原始响应')
+  const hit = getLatestLogByLabel(DOC_DEBUG_LABEL_RAW)
   return hit?.text || ''
 }
 
@@ -208,15 +242,15 @@ const MAX_DEBUG_LOG_ENTRIES = 36
 const MAX_DEBUG_TEXT_SOFT = 72 * 1024
 const MAX_DEBUG_TEXT_OTHER = 24 * 1024
 const DEBUG_COMPACT_JSON_LABELS = new Set([
-  '工作流请求JSON(file_url模式)',
-  '工作流请求(纯文本 URL)',
+  DOC_DEBUG_LABEL_REQ_JSON,
+  DOC_DEBUG_LABEL_REQ_PLAIN,
   'DescribeStorageCredential 解析JSON',
   '文件上传解析JSON',
 ])
 
 function clipDebugText(label, text) {
   if (typeof text !== 'string') return text
-  if (label === '工作流原始响应') {
+  if (label === DOC_DEBUG_LABEL_RAW) {
     if (text.length <= MAX_DEBUG_TEXT_SOFT) return text
     return `...[已省略前 ${text.length - MAX_DEBUG_TEXT_SOFT} 字符，仅保留末尾 SSE 便于调试]\n${text.slice(
       -MAX_DEBUG_TEXT_SOFT
@@ -332,13 +366,13 @@ function parseWorkflowSseEvents(sseText) {
 function downloadLatestWorkflowRawJson() {
   const rawText = resolveWorkflowRawForExport()
   if (!rawText) {
-    sendError.value = '暂无可下载的工作流原始响应'
+    sendError.value = '暂无可下载的接口原始响应'
     return
   }
   const events = parseWorkflowSseEvents(rawText)
   const payload = {
     exported_at: new Date().toISOString(),
-    source_label: '工作流原始响应',
+    source_label: DOC_DEBUG_LABEL_RAW,
     event_count: events.length,
     events,
   }
@@ -349,7 +383,7 @@ function downloadLatestWorkflowRawJson() {
   const a = document.createElement('a')
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   a.href = url
-  a.download = `teaching-doc-workflow-raw-${stamp}.json`
+  a.download = `teaching-doc-api-raw-${stamp}.json`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -359,8 +393,8 @@ const visualSummary = computed(() => {
   const credential = credentialRaw && credentialRaw.Response ? credentialRaw.Response : credentialRaw
   const uploadReq = getLatestLogJsonByLabel('文件上传请求(原始文件)')
   const uploadRes = getLatestLogJsonByLabel('文件上传响应状态')
-  const wfRes = getLatestLogJsonByLabel('工作流响应状态')
-  const wfLog = getLatestLogByLabel('工作流原始响应')
+  const wfRes = getLatestLogJsonByLabel(DOC_DEBUG_LABEL_RES_STATUS)
+  const wfLog = getLatestLogByLabel(DOC_DEBUG_LABEL_RAW)
   const wfRawText = wfLog?.text || resolveWorkflowRawForExport() || ''
   const assistantReply = extractAssistantReplyFromSse(wfRawText)
   return {
@@ -554,14 +588,14 @@ function buildWorkflowVizFromRawText(rawText) {
   if (!rawText) {
     return {
       ready: false,
-      reason: '暂无工作流原始响应',
+      reason: '暂无接口原始响应',
     }
   }
   const payload = getLatestSuccessfulWorkflowPayload(rawText)
   if (!payload) {
     return {
       ready: false,
-      reason: '尚未捕获成功的工作流结果',
+      reason: '尚未捕获成功的分析结果',
     }
   }
   const workflow = payload?.procedures?.[0]?.debugging?.work_flow || null
@@ -636,7 +670,7 @@ const workflowViz = computed(() => {
   const raw = r?.workflowRawText
   if (raw && String(raw).trim()) return buildWorkflowVizFromRawText(raw)
   if (r?.viz) return r.viz
-  const wfRawItem = getLatestLogByLabel('工作流原始响应')
+  const wfRawItem = getLatestLogByLabel(DOC_DEBUG_LABEL_RAW)
   const rawText = wfRawItem ? wfRawItem.text : ''
   return buildWorkflowVizFromRawText(rawText)
 })
@@ -1082,7 +1116,7 @@ function buildAnalysisMarkdown(report, viz) {
   lines.push('')
   lines.push(`- **文件**：${fileName}`)
   lines.push(`- **导出时间**：${new Date().toLocaleString('zh-CN')}`)
-  lines.push(`- **工作流**：${viz.workflowName || '-'} · \`${viz.workflowRunId || '-'}\``)
+  lines.push(`- **分析任务**：${viz.workflowName || '-'} · \`${viz.workflowRunId || '-'}\``)
   if (viz.metrics) {
     lines.push(
       `- **耗时 / Token**：${viz.metrics.elapsed ?? '-'} ms · ${viz.metrics.tokenCount ?? '-'}`
@@ -1197,7 +1231,7 @@ function buildAnalysisPdfHtml(report, viz, mindmapImageDataUrl = null) {
 <h1 style="font-size:18pt;margin:0 0 10px;">教学资料分析报告</h1>
 <p style="margin:4px 0;"><strong>文件</strong>：${fileName}</p>
 <p style="margin:4px 0;"><strong>导出时间</strong>：${escapeHtml(new Date().toLocaleString('zh-CN'))}</p>
-<p style="margin:4px 0;"><strong>工作流</strong>：${escapeHtml(viz.workflowName || '-')} / ${escapeHtml(
+<p style="margin:4px 0;"><strong>分析任务</strong>：${escapeHtml(viz.workflowName || '-')} / ${escapeHtml(
     viz.workflowRunId || '-'
   )}</p>
 <hr style="border:none;border-top:1px solid #e2e8f0;margin:12px 0;" />
@@ -1554,8 +1588,8 @@ function normalizeVisitorBizId(id) {
   return s || 'teacher-001'
 }
 
-/** qbot SSE：与专项模拟请求体结构一致；会话正文 content/message 仅为文件 URL（无其它文案） */
-function buildDocQbotSseBody(fileUrl, _messageIgnored, fileName, baseExtra = {}) {
+/** 文档分析第二步：与专项对话同一套最小 JSON 字段（见 BACKEND_INTEGRATION_SPEC §6） */
+function buildDocAnalyzeRequestBody(fileUrl, message, fileName, baseExtra = {}) {
   const session_id = normalizeSseSessionId(
     `sess_doc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
   )
@@ -1563,6 +1597,9 @@ function buildDocQbotSseBody(fileUrl, _messageIgnored, fileName, baseExtra = {})
   if (request_id.length > 255) request_id = request_id.slice(-255)
 
   const contentStr = ensureUtf8String(fileUrl || '')
+  const messageStr = ensureUtf8String(
+    message != null && String(message).trim() !== '' ? message : fileUrl || ''
+  )
 
   const vars = {}
   for (const [k, v] of Object.entries(baseExtra)) {
@@ -1585,25 +1622,20 @@ function buildDocQbotSseBody(fileUrl, _messageIgnored, fileName, baseExtra = {})
   }
 
   const model = vars.model ? ensureUtf8String(vars.model) : ''
+  if (Object.prototype.hasOwnProperty.call(vars, 'model')) delete vars.model
+
   const body = {
     request_id,
-    content: contentStr,
-    message: contentStr,
     session_id,
-    // 后端代理模式下不在浏览器携带 bot_app_key（由服务端注入）
-    bot_app_key: BACKEND_BASE ? '' : getDocBotAppKey(),
-    visitor_biz_id: normalizeVisitorBizId(DOC_SSE_VISITOR_BIZ_ID),
-    incremental: true,
-    streaming_throttle: 10,
-    visitor_labels: [],
+    content: contentStr,
+    message: messageStr,
     evaluation,
     custom_variables: stringifyCustomVariables(vars),
-    search_network: 'disable',
     stream: BACKEND_USE_JSON_RESPONSE ? 'disable' : 'enable',
-    workflow_status: DOC_QBOT_SSE_WORKFLOW_STATUS,
-    tcadp_user_id: '',
   }
   if (model) body.model = model
+  const vid = normalizeVisitorBizId(DOC_SSE_VISITOR_BIZ_ID)
+  if (vid) body.visitor_id = vid
   return body
 }
 
@@ -1707,10 +1739,12 @@ function parseCredentialPayload(obj) {
 async function describeStorageCredential(file) {
   if (!DOC_STORAGE_CREDENTIAL_URL) {
     pushDebugLog('SEND', 'DescribeStorageCredential 未执行', {
-      reason: '缺少 VITE_DOC_STORAGE_CREDENTIAL_URL',
+      reason: '未配置存储凭证 URL（VITE_BACKEND_BASE_URL 或 VITE_DOC_STORAGE_CREDENTIAL_URL）',
       file: file ? { name: file.name, type: file.type, size: file.size } : null,
     })
-    throw new Error('缺少 VITE_DOC_STORAGE_CREDENTIAL_URL，未调用 DescribeStorageCredential')
+    throw new Error(
+      '未配置存储凭证 URL。请设置 VITE_BACKEND_BASE_URL（推荐）或 VITE_DOC_STORAGE_CREDENTIAL_URL'
+    )
   }
   const body = {
     FileType: guessFileType(file),
@@ -1726,6 +1760,7 @@ async function describeStorageCredential(file) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
+      ...(BACKEND_API_KEY ? { Authorization: `Bearer ${BACKEND_API_KEY}` } : {}),
     },
     body: JSON.stringify(body),
   })
@@ -1788,6 +1823,11 @@ async function uploadFileToStorage(file, credential) {
     objectKey: credential ? credential.objectKey : '',
   })
   if (isCosSignedPut) {
+    if (!String(DOC_COS_UPLOAD_PROXY_URL || '').trim()) {
+      throw new Error(
+        '当前为预签名 PUT 上传，请配置 VITE_BACKEND_PATH_DOC_COS_PROXY 或 VITE_DOC_COS_UPLOAD_PROXY_URL，由后端转发上传'
+      )
+    }
     const putHeaders = {
       ...(credential && credential.headers ? credential.headers : {}),
       'Content-Type': file.type || 'application/octet-stream',
@@ -1796,10 +1836,11 @@ async function uploadFileToStorage(file, credential) {
     try {
       res = await fetch(DOC_COS_UPLOAD_PROXY_URL, {
         method: 'POST',
-        // 通过本地代理转发，避免浏览器直接 PUT 到 COS 被 CORS 拦截
+        // 通过同源/后端代理转发 PUT，避免浏览器直传对象存储被 CORS 拦截
         headers: {
           ...putHeaders,
           'x-upload-url': uploadUrl,
+          ...(BACKEND_API_KEY ? { Authorization: `Bearer ${BACKEND_API_KEY}` } : {}),
         },
         body: file,
       })
@@ -1835,9 +1876,13 @@ async function uploadFileToStorage(file, credential) {
     form.append('key', credential.objectKey)
   }
   form.append('file', file, file.name)
+  const uploadHeaders = { ...(credential && credential.headers ? credential.headers : {}) }
+  if (BACKEND_API_KEY && !uploadHeaders.Authorization) {
+    uploadHeaders.Authorization = `Bearer ${BACKEND_API_KEY}`
+  }
   const res = await fetch(uploadUrl, {
     method: 'POST',
-    headers: credential && credential.headers ? credential.headers : undefined,
+    headers: Object.keys(uploadHeaders).length ? uploadHeaders : undefined,
     body: form,
   }).catch((e) => {
     pushDebugLog('RECV', '文件上传请求异常(可能CORS/网络)', {
@@ -1875,83 +1920,14 @@ async function uploadFileToStorage(file, credential) {
   throw new Error('文件上传成功但响应中没有 file_url/url 字段')
 }
 
-async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
-  const endpoint = resolveDocWorkflowEndpoint(extra)
-  if (!String(endpoint || '').trim()) {
-    throw new Error('未配置工作流地址')
-  }
-  const isWorkflowTrigger = /\/v1\/workflows\/.+\/trigger(?:\?|$)/.test(endpoint)
-  const isQbotSseEndpoint =
-    /\/v1\/qbot\/chat\/sse(?:\?|$)/.test(endpoint) ||
-    (!!BACKEND_BASE && BACKEND_DOC_QBOT_SHAPED_BODY)
-  const baseExtra = { ...extra }
-  delete baseExtra._workflowEndpoint
-
-  const sessionIdForGeneric = normalizeSseSessionId(
-    `sess_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-  )
-  const body = isWorkflowTrigger
-    ? fileUrl
-    : isQbotSseEndpoint
-    ? buildDocQbotSseBody(fileUrl, message, baseExtra.file_name || '', baseExtra)
-    : {
-        session_id: sessionIdForGeneric,
-        message,
-        file_url: fileUrl,
-        ...stringifyCustomVariables(baseExtra),
-      }
-
-  const authorization = BACKEND_API_KEY
-    ? `Bearer ${BACKEND_API_KEY}`
-    : DOC_WORKFLOW_AUTHORIZATION
-      ? DOC_WORKFLOW_AUTHORIZATION
-      : DOC_WORKFLOW_API_KEY
-        ? `Bearer ${DOC_WORKFLOW_API_KEY}`
-        : DOC_WORKFLOW_APP_KEY
-          ? `Bearer ${DOC_WORKFLOW_APP_KEY}`
-          : ''
-  const attachWorkflowAuth =
-    (!!authorization && !isQbotSseEndpoint) || (!!BACKEND_BASE && !!BACKEND_API_KEY && isQbotSseEndpoint)
-  const contentType = isWorkflowTrigger
-    ? 'text/plain; charset=utf-8'
-    : 'application/json; charset=utf-8'
-  pushDebugLog('SEND', isWorkflowTrigger ? '工作流请求(纯文本 URL)' : '工作流请求JSON(file_url模式)', {
-    endpoint,
-    body: isWorkflowTrigger ? fileUrl : body,
-    contentType,
-    authorization: attachWorkflowAuth ? '(已设置)' : '(未设置/或由 qbot 体字段鉴权)',
-  })
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': contentType,
-      ...(attachWorkflowAuth ? { Authorization: authorization } : {}),
-      ...(isQbotSseEndpoint
-        ? {
-            Accept: BACKEND_USE_JSON_RESPONSE
-              ? 'application/json'
-              : 'text/event-stream; charset=utf-8',
-          }
-        : {}),
-    },
-    body: isWorkflowTrigger ? fileUrl : JSON.stringify(body),
-  })
-  const text = await res.text()
-  pushDebugLog('RECV', '工作流响应状态', {
-    status: res.status,
-    contentType: String(res.headers.get('Content-Type') || ''),
-  })
-  pushDebugLog('RECV', '工作流原始响应', text)
-  if (!res.ok) {
-    throw new Error(`工作流请求失败(${res.status})：${text.slice(0, 180)}`)
-  }
+function parseDocAnalysisResponseText(text, allowSseDataFallback) {
   const workflowRawText = text
   try {
     const parsed = JSON.parse(text)
-    pushDebugLog('RECV', '工作流解析JSON', parsed)
+    pushDebugLog('RECV', '接口解析JSON', parsed)
     return { reply: extractWorkflowText(parsed) || text, workflowRawText }
   } catch (_) {
-    if (isQbotSseEndpoint && text) {
+    if (allowSseDataFallback && text) {
       const lines = text.split('\n')
       let latestExtracted = ''
       for (const line of lines) {
@@ -1963,7 +1939,7 @@ async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
           const sseJson = JSON.parse(raw)
           const extracted = extractWorkflowText(sseJson)
           if (extracted) latestExtracted = extracted
-        } catch (_) {
+        } catch {
           // ignore
         }
       }
@@ -1971,6 +1947,113 @@ async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
     }
     return { reply: text, workflowRawText }
   }
+}
+
+/**
+ * 一步上传并分析：POST multipart，字段 file + 可选 message、file_name
+ * 响应与第二步 JSON/SSE 约定相同（见 parseDocAnalysisResponseText）
+ */
+async function sendDocAnalyzeMultipartSingleStep(file, message, extra = {}) {
+  const endpoint = joinBackendDocUrl(BACKEND_PATH_DOC_ANALYZE)
+  if (!String(endpoint || '').trim()) {
+    throw new Error('未配置 VITE_BACKEND_BASE_URL，无法使用一步分析')
+  }
+  const form = new FormData()
+  form.append('file', file, file.name)
+  if (message != null && String(message).trim()) {
+    form.append('message', String(message).trim())
+  }
+  const fn = extra && extra.file_name != null ? String(extra.file_name).trim() : ''
+  if (fn) form.append('file_name', fn)
+  if (DOC_SSE_ROLE) form.append('role', DOC_SSE_ROLE)
+  if (DOC_SSE_TRIGGER) form.append('trigger', DOC_SSE_TRIGGER)
+  if (DOC_SSE_CHARACTER_ID) form.append('characterId', DOC_SSE_CHARACTER_ID)
+  if (DOC_SSE_MODEL_NAME) form.append('model', DOC_SSE_MODEL_NAME)
+  if (DOC_WORKFLOW_ENTRY) form.append('workflow_entry', DOC_WORKFLOW_ENTRY)
+
+  pushDebugLog('SEND', '一步上传并分析(multipart)', {
+    endpoint,
+    file: { name: file.name, type: file.type, size: file.size },
+    messagePreview: String(message || '').slice(0, 80),
+  })
+  const headers = {}
+  if (BACKEND_API_KEY) headers.Authorization = `Bearer ${BACKEND_API_KEY}`
+  if (BACKEND_USE_JSON_RESPONSE) headers.Accept = 'application/json'
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: form,
+  })
+  const text = await res.text()
+  pushDebugLog('RECV', '一步分析响应状态', {
+    status: res.status,
+    contentType: String(res.headers.get('Content-Type') || ''),
+  })
+  pushDebugLog('RECV', '一步分析原始响应', text)
+  if (!res.ok) {
+    throw new Error(`一步分析失败(${res.status})：${text.slice(0, 180)}`)
+  }
+  return parseDocAnalysisResponseText(text, BACKEND_USE_JSON_RESPONSE === false)
+}
+
+async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
+  const endpoint = resolveDocWorkflowEndpoint(extra)
+  if (!String(endpoint || '').trim()) {
+    throw new Error('未配置文档分析接口地址（请设置 VITE_BACKEND_BASE_URL 或 VITE_DOC_WORKFLOW_ENDPOINT）')
+  }
+  const isWorkflowTrigger = /\/v1\/workflows\/.+\/trigger(?:\?|$)/.test(endpoint)
+  const baseExtra = { ...extra }
+  delete baseExtra._workflowEndpoint
+
+  const body = isWorkflowTrigger
+    ? fileUrl
+    : buildDocAnalyzeRequestBody(fileUrl, message, baseExtra.file_name || '', baseExtra)
+
+  const authorization = BACKEND_API_KEY
+    ? `Bearer ${BACKEND_API_KEY}`
+    : DOC_WORKFLOW_AUTHORIZATION
+      ? DOC_WORKFLOW_AUTHORIZATION
+      : DOC_WORKFLOW_API_KEY
+        ? `Bearer ${DOC_WORKFLOW_API_KEY}`
+        : DOC_WORKFLOW_APP_KEY
+          ? `Bearer ${DOC_WORKFLOW_APP_KEY}`
+          : ''
+  const attachAuth = !!authorization
+  const contentType = isWorkflowTrigger
+    ? 'text/plain; charset=utf-8'
+    : 'application/json; charset=utf-8'
+  pushDebugLog('SEND', isWorkflowTrigger ? DOC_DEBUG_LABEL_REQ_PLAIN : DOC_DEBUG_LABEL_REQ_JSON, {
+    endpoint,
+    body: isWorkflowTrigger ? fileUrl : body,
+    contentType,
+    authorization: attachAuth ? '(已设置)' : '(未设置)',
+  })
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': contentType,
+      ...(attachAuth ? { Authorization: authorization } : {}),
+      ...(!isWorkflowTrigger
+        ? {
+            Accept: BACKEND_USE_JSON_RESPONSE
+              ? 'application/json'
+              : 'text/event-stream; charset=utf-8',
+          }
+        : {}),
+    },
+    body: isWorkflowTrigger ? fileUrl : JSON.stringify(body),
+  })
+  const text = await res.text()
+  pushDebugLog('RECV', DOC_DEBUG_LABEL_RES_STATUS, {
+    status: res.status,
+    contentType: String(res.headers.get('Content-Type') || ''),
+  })
+  pushDebugLog('RECV', DOC_DEBUG_LABEL_RAW, text)
+  if (!res.ok) {
+    throw new Error(`文档分析请求失败(${res.status})：${text.slice(0, 180)}`)
+  }
+  return parseDocAnalysisResponseText(text, BACKEND_USE_JSON_RESPONSE === false)
 }
 
 async function onSend() {
@@ -1995,7 +2078,7 @@ async function onSend() {
         sent.value = true
         return
       }
-      sendInfo.value = '未选择文件，执行空文件调试：仅测试 DescribeStorageCredential...'
+      sendInfo.value = '未选择文件，执行空文件调试：仅测试存储凭证接口...'
       const mockFile = {
         name: 'empty-debug.txt',
         type: 'text/plain',
@@ -2003,7 +2086,7 @@ async function onSend() {
       }
       const credential = await describeStorageCredential(mockFile)
       pushDebugLog('RECV', '空文件调试凭证结果', credential || {})
-      sendInfo.value = '空文件调试成功：DescribeStorageCredential 已返回数据'
+      sendInfo.value = '空文件调试成功：存储凭证接口已返回数据'
       sent.value = true
       return
     }
@@ -2014,31 +2097,41 @@ async function onSend() {
     analysisBatchDone.value = 0
     let openedModalThisBatch = false
 
-    sendInfo.value = DOC_FILE_UPLOAD_URL
-      ? `正在分析第 1/${batchTotal} 个文件（上传 → 工作流）…\n切换至其他模块不会中断，返回本页可继续查看。`
-      : `正在分析第 1/${batchTotal} 个文件（凭证 → 上传 → 工作流）…\n切换至其他模块不会中断，返回本页可继续查看。`
+    sendInfo.value = BACKEND_DOC_SINGLE_STEP
+      ? `正在分析第 1/${batchTotal} 个文件（一步上传并分析）…\n切换至其他模块不会中断，返回本页可继续查看。`
+      : DOC_FILE_UPLOAD_URL
+        ? `正在分析第 1/${batchTotal} 个文件（上传 → 分析接口）…\n切换至其他模块不会中断，返回本页可继续查看。`
+        : `正在分析第 1/${batchTotal} 个文件（凭证 → 上传 → 分析接口）…\n切换至其他模块不会中断，返回本页可继续查看。`
     const resultLines = []
     for (let i = 0; i < batchFiles.length; i += 1) {
       const file = batchFiles[i]
       sendInfo.value = `正在分析「${file.name}」（${i + 1}/${batchTotal}）…\n已完成 ${analysisBatchDone.value} 个；下方「文件报告」中已完成的条目可随时打开阅读。`
-      const credential = await getDocUploadCredential(file)
-      const workflowEndpointFromCredential =
-        credential && credential.workflowUrl ? String(credential.workflowUrl).trim() : ''
-      if (!workflowEndpointFromCredential) {
-        pushDebugLog('RECV', '凭证未带 workflow_url，将使用专项同源 endpoint', {
-          credential: credential || {},
-          resolvedEndpoint: resolveDocWorkflowEndpoint({}),
+      let reply = ''
+      let workflowRawText = ''
+      if (BACKEND_DOC_SINGLE_STEP && BACKEND_BASE) {
+        const one = await sendDocAnalyzeMultipartSingleStep(file, `请诊断这份教学材料：${file.name}`, {
+          file_name: file.name,
         })
-      }
-      const fileUrl = await uploadFileToStorage(file, credential)
-      const { reply, workflowRawText } = await sendDocWorkflowWithFileUrl(
-        fileUrl,
-        `请诊断这份教学材料：${file.name}`,
-        {
+        reply = one.reply
+        workflowRawText = one.workflowRawText
+      } else {
+        const credential = await getDocUploadCredential(file)
+        const workflowEndpointFromCredential =
+          credential && credential.workflowUrl ? String(credential.workflowUrl).trim() : ''
+        if (!workflowEndpointFromCredential) {
+          pushDebugLog('RECV', '凭证未带 workflow_url，将使用专项同源 endpoint', {
+            credential: credential || {},
+            resolvedEndpoint: resolveDocWorkflowEndpoint({}),
+          })
+        }
+        const fileUrl = await uploadFileToStorage(file, credential)
+        const wf = await sendDocWorkflowWithFileUrl(fileUrl, `请诊断这份教学材料：${file.name}`, {
           _workflowEndpoint: workflowEndpointFromCredential || undefined,
           file_name: file.name,
-        }
-      )
+        })
+        reply = wf.reply
+        workflowRawText = wf.workflowRawText
+      }
       const brief = reply ? String(reply).slice(0, 60) : '无可提取文本返回'
       resultLines.push(`${file.name} -> ${brief}`)
       const rawText = workflowRawText || ''
@@ -2173,7 +2266,7 @@ onBeforeUnmount(() => {
               <div class="analysis-loading-spinner" aria-hidden="true" />
               <p class="analysis-loading-title">正在分析</p>
               <p class="analysis-loading-progress">{{ analysisProgressLine }}</p>
-              <p class="analysis-loading-detail">{{ sendInfo || '正在上传并与工作流通信，请稍候…' }}</p>
+              <p class="analysis-loading-detail">{{ sendInfo || '正在上传并与后端通信，请稍候…' }}</p>
             </div>
           </div>
           <section
@@ -2529,7 +2622,7 @@ onBeforeUnmount(() => {
               <p>响应类型：{{ visualSummary.uploadRes?.contentType || '-' }}</p>
             </article>
             <article class="visual-card">
-              <h5>工作流状态</h5>
+              <h5>分析接口状态</h5>
               <p>响应状态：{{ visualSummary.wfRes?.status ?? '-' }}</p>
               <p>响应类型：{{ visualSummary.wfRes?.contentType || '-' }}</p>
               <p>回复摘要：{{ visualSummary.assistantReply || '暂无可提取回复' }}</p>

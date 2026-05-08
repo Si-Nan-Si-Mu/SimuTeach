@@ -254,7 +254,7 @@ onBeforeUnmount(() => {
           "
         >
           <FolderOpen class="sidebar-btn-icon" />
-          <span v-if="!collapsed">工作流数据</span>
+          <span v-if="!collapsed">接口记录</span>
         </button>
       </div>
       <div class="sidebar-footer">

@@ -2,10 +2,10 @@
  * 须在 `import '../vendor/front/js/workflow.js'` 之前执行。
  *
  * 模式 A（推荐）：配置 VITE_BACKEND_BASE_URL + VITE_BACKEND_API_KEY
- * - 专项 / 课堂 / 训练报告 均只请求你的后端；浏览器不再直连腾讯云 qbot SSE。
+ * - 专项 / 课堂 / 训练报告 / 教学文档（默认一步 POST …/simu/doc/analyze）均指向你的后端。
  * - BASE 可为完整 URL（http://127.0.0.1:8787）或同源前缀（/api）：与下方 PATH_* 拼接，由网关反代到容器。
  *
- * 模式 B（兼容）：不配置 BACKEND_BASE 时，仍可通过 VITE_SPECIAL_* / VITE_CLASSROOM_* / VITE_REPORT_* 自行指定 endpoint 与密钥（旧行为）。
+ * 模式 B（兼容）：不配置 BACKEND_BASE 时，仍可通过 VITE_SPECIAL_* / VITE_CLASSROOM_* / VITE_REPORT_* 自行指定 endpoint 与密钥。
  */
 function trimSlash(s) {
   return String(s || '').replace(/\/+$/, '')
@@ -24,7 +24,7 @@ const BACKEND_API_KEY = (import.meta.env.VITE_BACKEND_API_KEY || '').trim()
 /** 配置统一后端时默认走 JSON 单次响应（非 SSE）；设为 false 可恢复 Accept: text/event-stream */
 const BACKEND_PREFER_JSON =
   BACKEND_BASE && import.meta.env.VITE_BACKEND_USE_JSON_RESPONSE !== 'false'
-/** 未配置 BASE 时仅当显式 true 才启用 JSON 模式（旧版直连腾讯云多为 SSE） */
+/** 未配置 BASE 时仅当显式 true 才启用 JSON 模式（遗留直连多为 SSE） */
 const LEGACY_PREFER_JSON = !BACKEND_BASE && import.meta.env.VITE_BACKEND_USE_JSON_RESPONSE === 'true'
 
 /** 默认不带 /api 前缀，便于 BASE=/api 时得到 /api/simu/...；若服务挂在 8787 根路径下的 /api，可把 BASE 设为 http://127.0.0.1:8787/api */
@@ -90,14 +90,11 @@ if (BACKEND_BASE) {
     endpoint: import.meta.env.VITE_REPORT_ENDPOINT || '',
     httpUrl: (function resolveReportHttpUrl() {
       const raw = (import.meta.env.VITE_REPORT_HTTP_URL || '').trim().replace(/\/$/, '')
-      const prodFallback = 'https://agent.orangeblog.us.kg/v1/chat/completions'
       if (import.meta.env.DEV) {
-        if (!raw || /^https?:\/\//i.test(raw)) {
-          return '/api/report'
-        }
-        return raw
+        if (raw) return raw
+        return '/api/report'
       }
-      return (raw || prodFallback).replace(/\/$/, '')
+      return raw
     })(),
     httpApiKey: import.meta.env.VITE_REPORT_HTTP_API_KEY || '',
     chatModel: import.meta.env.VITE_REPORT_CHAT_MODEL || '',

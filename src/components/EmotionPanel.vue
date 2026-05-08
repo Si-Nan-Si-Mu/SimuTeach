@@ -379,7 +379,7 @@ function buildCharacterForRadar(student) {
   return {
     ...base,
     ...student,
-    // 允许外部（例如工作流动态情绪映射）覆盖 traits，更新雷达图
+    // 允许外部（例如对话接口动态情绪映射）覆盖 traits，更新雷达图
     traits: student.traits || base.traits,
     traitLabels: student.traitLabels || base.traitLabels
   }

@@ -1,11 +1,17 @@
 ﻿# SimuTeach 后端对接规范
 
-本文档描述 **SimuTeach 前端（Vue + Vite）** 在配置 `VITE_BACKEND_BASE_URL` 时，对统一后端的 **URL 约定、鉴权、请求体与响应格式** 要求。默认 **单次 JSON 响应**（`Accept: application/json`，请求体 `stream: disable`），不再建立 SSE 长连接；仅在 `VITE_BACKEND_USE_JSON_RESPONSE=false` 时前端仍可按 SSE 解析（兼容旧腾讯云 qbot）。后端可按自身架构调整路由前缀，只需与 `BASE` 与 `VITE_BACKEND_PATH_*` 对齐。
+本文档描述 **SimuTeach 前端（Vue + Vite）** 在配置 `VITE_BACKEND_BASE_URL` 时，对统一后端的 **URL 约定、鉴权、请求体与响应格式**。默认 **单次 JSON**（`Accept: application/json`，请求体 `stream: disable`）；仅在 `VITE_BACKEND_USE_JSON_RESPONSE=false` 时按 **SSE** 解析。后端可自行调整路由前缀，与 `BASE` 及 `VITE_BACKEND_PATH_*` 对齐即可。
+
+### 后端同学可先看这三步
+
+1. 在 `.env.local` 配置 **`VITE_BACKEND_BASE_URL`**（及可选 **`VITE_BACKEND_API_KEY`**），复制模板见仓库 **`.env.example`**。  
+2. 按 **§9** 默认路径实现 `POST` 接口；文档分析默认 **一步** `multipart`（§5.1），不需要浏览器再走对象存储凭证。  
+3. 对话与文档第二步的请求 JSON 见 **§6**；响应形状与情绪字段见 **§7**。
 
 **实现参考（源码）**
 
 - 注入与 URL 拼接：`src/classroom-workflow-inject.js`
-- 对话 / 课堂 / 报告客户端：`vendor/front/js/workflow.js`
+- 专项 / 课堂 / 报告 HTTP 客户端：`vendor/front/js/workflow.js`
 - 教学文档分析：`src/components/TeachingDocAnalysis.vue`
 
 ---
@@ -19,9 +25,14 @@
 | `VITE_BACKEND_PATH_SPECIAL` | 专项模拟对话（相对 BASE） | 默认 `/simu/special/chat` |
 | `VITE_BACKEND_PATH_CLASSROOM` | 课堂模拟对话 | 默认 `/simu/classroom/chat` |
 | `VITE_BACKEND_PATH_REPORT` | 训练报告 HTTP | 默认 `/simu/report`；若需 `/api/report` 可设 `BASE=/api` 且 `PATH_REPORT=/report` |
-| `VITE_BACKEND_PATH_DOC` | 文档分析（仅 `TeachingDocAnalysis`） | 默认 `/simu/doc/chat` |
+| `VITE_BACKEND_PATH_DOC` | 文档分析 **两步模式**之第二步（JSON，见 §6 / §5.3） | 默认 `/simu/doc/chat` |
+| `VITE_BACKEND_PATH_DOC_UPLOAD` | **两步模式**之第一步（`multipart` 仅上传） | 默认 `/simu/doc/upload` |
+| `VITE_BACKEND_PATH_DOC_ANALYZE` | **一步模式**：`multipart` 上传并返回分析 | 默认 `/simu/doc/analyze` |
+| `VITE_BACKEND_PATH_DOC_STORAGE` | （可选）存储凭证，仅预签名上传等特殊部署 | 默认 `/simu/doc/storage-credential` |
+| `VITE_BACKEND_PATH_DOC_COS_PROXY` | （可选）经后端转发 PUT，避免浏览器直传 CORS | 默认 `/simu/doc/cos-upload` |
+| `VITE_BACKEND_DOC_SINGLE_STEP` | 为 `false` 时改为**两步**（先 `upload` 再 `chat`） | 配置 `BASE` 时默认 **一步**（未写 `false` 即一步） |
 | `VITE_BACKEND_USE_JSON_RESPONSE` | 为 `false` 时专项/课堂/文档分析恢复 **SSE**（`Accept: text/event-stream`，`stream: enable`） | 未配置 `BASE` 时默认 SSE；**已配置 `BASE` 时默认 JSON**（等价于 true） |
-| `VITE_BACKEND_DOC_QBOT_BODY` | 文档分析是否使用与下文章节 4 相同的「qbot 形」JSON | 默认 `true`；`false` 时为简化 JSON（见 5） |
+| `VITE_REPORT_PROXY_TARGET` | （可选）仅 **本地 `npm run dev`**：为 `/api/report` 配置反向代理的上游根 URL（无尾 `/`） | 未设置时不注册该代理；见 **§10** |
 
 未设置 `VITE_BACKEND_BASE_URL` 时，前端走旧版多环境变量路径，**不在本文档范围**。
 
@@ -59,7 +70,7 @@
 ## 3. 专项模拟对话
 
 - **默认路径**：`{BASE}/simu/special/chat`（可配置）。
-- **请求体**：见 **第 6 节「qbot 形对话请求体」**。
+- **请求体**：见 **第 6 节「对话 JSON 请求体」**。
 - **典型 `custom_variables`（由前端传入，均为字符串）**：含 `role`（如 `teacher`）、业务扩展字段等；**不要**把 `evaluation: true` 留在 `custom_variables`（前端会抽出并写入顶层 `evaluation`）。
 
 ### 3.1 响应（默认 JSON）
@@ -84,7 +95,7 @@
 ## 4. 课堂模拟对话
 
 - **默认路径**：`{BASE}/simu/classroom/chat`（可配置）。
-- **请求体**：同第 6 节，且前端保证：
+- **请求体**：同第 6 节；前端另外保证：
   - 顶层 **`model`**：若 `custom_variables` 未提供可用 model，则默认 **`"李大志"`**。
   - 顶层 **`proactive`**：`boolean`，仅课堂使用；`true` 表示主动轮询类场景。
   - `custom_variables` 至少含 `role: "teacher"`、`channel: "classroom"`，以及业务侧 `extra` 合并字段。
@@ -95,49 +106,118 @@
 
 ---
 
-## 5. 教学文档分析
+## 5. 教学文档分析（统一后端 · **无需凭证**）
 
-- **默认路径**：`{BASE}/simu/doc/chat`（可配置）。
-- 当 `VITE_BACKEND_DOC_QBOT_BODY !== 'false'`（默认）：请求体同 **第 6 节**，且：
-  - `content` / `message` **仅为文件 URL 字符串**（无其它文案）。
-  - `custom_variables` 含 `file_url`、`file_name`、`role`、`trigger` 等（与 `.env` 中 `VITE_DOC_*` 一致时可变）。
-  - 后端代理模式下前端可能将 **`bot_app_key` 置空**，由服务端补全上游密钥。
-- 当 **`VITE_BACKEND_DOC_QBOT_BODY=false`**：前端走「通用」分支，请求体为简化 JSON（至少含 `session_id`、`message`、`file_url` 及字符串化后的自定义字段），**不再保证**与第 6 节字段完全一致；后端需按该分支自行约定。
+配置 `VITE_BACKEND_BASE_URL` 且 **`VITE_BACKEND_DOC_SINGLE_STEP` 未设为 `false`** 时，前端默认 **一步完成**：**单次 `multipart` 请求**上传文件并取回分析结果，**不要求**先拿 `file_url` 再调第二个接口。
 
-### 5.1 响应
-
-- **默认**与专项一致：`Accept: application/json`，单次 JSON 体（`extractWorkflowText` 等解析）。
-- `VITE_BACKEND_USE_JSON_RESPONSE=false` 时仍可返回 SSE；前端会按行解析 `data:`（见 `TeachingDocAnalysis.vue` 内 `sendDocWorkflowWithFileUrl`）。
-
-### 5.2 上传与凭证（非 BASE 路径）
-
-- 文档上传仍可能请求 `VITE_DOC_STORAGE_CREDENTIAL_URL`、`VITE_DOC_COS_UPLOAD_PROXY_URL`、`VITE_DOC_FILE_UPLOAD_URL` 等（见 `.env.example`），**不属于** `VITE_BACKEND_BASE_URL` 的默认四条路由；若全部由自建后端提供，请在部署文档中单独列出这些 URL。
+若你希望后端仍按「先存对象再传 URL」拆分，可设 **`VITE_BACKEND_DOC_SINGLE_STEP=false`**，则走 **§5.2 / §5.3** 的两步约定。
 
 ---
 
-## 6. qbot 形对话请求体（JSON）
+### 5.1 一步模式（默认）：上传并分析
 
-以下为 `vendor/front/js/workflow.js` 中 `buildRequestBodyWithConfig` 生成的对象，后端可原样转发腾讯云或自行消费。
+| 项 | 约定 |
+|----|------|
+| **方法 / 路径** | `POST` `{BASE}{VITE_BACKEND_PATH_DOC_ANALYZE 或默认 /simu/doc/analyze}` |
+| **Content-Type** | `multipart/form-data`（由浏览器自动带 boundary） |
+| **表单字段** | **`file`**（必填）：文件二进制；**`message`**（可选）：分析提示语，前端会传如「请诊断这份教学材料：xxx.docx」；**`file_name`**（可选）：原始文件名 |
+| **附加字段** | 若 `.env` 中配置了 `VITE_DOC_SSE_ROLE`、`VITE_DOC_SSE_TRIGGER`、`VITE_DOC_SSE_CHARACTER_ID`、`VITE_DOC_SSE_MODEL_NAME`、`VITE_DOC_WORKFLOW_ENTRY`，前端会以同名表单项一并提交（均为文本） |
+| **鉴权** | 若配置了 `VITE_BACKEND_API_KEY`：`Authorization: Bearer <密钥>` |
+| **Accept** | 默认 `application/json`（与 `VITE_BACKEND_USE_JSON_RESPONSE` 一致）；为 `false` 时可返回 SSE，`data:` 行解析规则同下 |
+
+**响应**  
+与 **§5.5** 相同：JSON 优先（`extractWorkflowText` 可识别的结构）；或 SSE 分片（在关闭 JSON 模式时）。
+
+---
+
+### 5.2 两步模式：仅上传（`VITE_BACKEND_DOC_SINGLE_STEP=false` 时使用第一步）
+
+### 5.2.1 文件上传
+
+| 项 | 约定 |
+|----|------|
+| **方法 / 路径** | `POST` `{BASE}{VITE_BACKEND_PATH_DOC_UPLOAD 或默认 /simu/doc/upload}` |
+| **Content-Type** | `multipart/form-data` |
+| **表单字段** | **`file`**：二进制文件本体（前端字段名固定为 `file`） |
+| **鉴权** | 若配置了 `VITE_BACKEND_API_KEY`：`Authorization: Bearer <密钥>` |
+
+**响应（HTTP 200，JSON）**  
+前端用 `pickUploadedUrl` 解析，**至少**在 JSON **根级或** `data` / `Response` 嵌套对象中提供以下 **任一字段名** 的 **字符串**（可公网或内网可访问的完整 URL）：
+
+| 字段名（任一即可） |
+|---------------------|
+| `file_url`、`fileUrl`、`FileUrl`、`url`、`URL`、`download_url`、`downloadUrl` |
+
+示例：
+
+```json
+{ "file_url": "https://api.example.com/static/uploads/abc.png" }
+```
+
+```json
+{ "data": { "url": "https://cdn.example.com/doc/xyz.docx" } }
+```
+
+上传失败时返回非 2xx，body 建议含可读 `message` / `error.message`。
+
+---
+
+### 5.3 两步模式：提交分析（JSON）
+
+| 项 | 约定 |
+|----|------|
+| **方法 / 路径** | `POST` `{BASE}{VITE_BACKEND_PATH_DOC 或默认 /simu/doc/chat}` |
+| **Content-Type** | `application/json; charset=utf-8` |
+| **Accept** | 默认 `application/json`（与 `VITE_BACKEND_USE_JSON_RESPONSE` 一致） |
+| **鉴权** | 同 §5.2.1 |
+
+请求体见 **第 6 节**。文档分析场景约定：
+
+- **`content`**：上传接口返回的 **文件 URL**（可访问）。
+- **`message`**：可与 `content` 相同，或为用户提示语（如「请诊断这份教学材料：xxx.docx」）。
+- **`custom_variables`**（值均为 **string**）：至少常含 `file_url`、`file_name`、`role`、`trigger`；可选 `characterId`、`model`、`workflow_entry` 等（由 `TeachingDocAnalysis.vue` 与 `.env` 注入）。
+
+后端据 URL 拉取文件并返回分析即可；**统一后端直传 / 一步模式不要求**浏览器再走存储凭证链路。
+
+---
+
+### 5.4 两步模式第二步（小结）
+
+与 **§5.3**、**§6** 相同：前端只发一套 **最小对话 JSON**，无历史「工作流 / qbot」专有字段。
+
+---
+
+### 5.5 分析接口的响应（含一步模式）
+
+- **默认 JSON**：`Content-Type` 建议 `application/json`；正文可被 `extractWorkflowText` 等解析（与专项对话类似，支持 Chat Completions 形、`x-debug` 等，见第 7 节）。
+- **SSE**：仅当 `VITE_BACKEND_USE_JSON_RESPONSE=false` 时，可返回 `text/event-stream`，前端按 `data:` 行解析。
+
+---
+
+### 5.6 可选：存储凭证与 COS 转发（仅特殊部署）
+
+仅当你将 `VITE_DOC_FILE_UPLOAD_URL` **留空**且仍走「预签名 PUT」上传时，才需要实现 `VITE_BACKEND_PATH_DOC_STORAGE`（存储凭证）与 `VITE_BACKEND_PATH_DOC_COS_PROXY`（浏览器经后端转发 PUT，避免 CORS）。**仓库内 Vite 开发服务器不再内置腾讯云签名中间件**；凭证与上传须由你的后端或显式配置的 URL 提供。
+
+---
+
+## 6. 对话 JSON 请求体（专项 / 课堂 / 文档第二步）
+
+由 `vendor/front/js/workflow.js` 的 `buildRequestBodyWithConfig` 与 `TeachingDocAnalysis.vue` 的 `buildDocAnalyzeRequestBody` 生成，**统一最小字段集**如下（后端可直接消费，无需再适配第三方专有字段名）。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `request_id` | string | ≤255；前端生成 |
-| `content` | string | 用户侧正文（专项/课堂为教师发言；文档分析为文件 URL） |
-| `message` | string | 与 `content` 相同 |
 | `session_id` | string | 2–64，仅 `[a-zA-Z0-9_-]` |
-| `bot_app_key` | string | 浏览器侧后端模式常为 **空字符串**；由网关或服务注入真实密钥 |
-| `visitor_biz_id` | string | 访客 ID，同上字符集与长度限制 |
-| `incremental` | boolean | 固定 `true` |
-| `streaming_throttle` | number | 如 `10` |
-| `visitor_labels` | array | 常为 `[]` |
-| `evaluation` | boolean | 报告类意图为 `true`，普通对话 `false` |
-| `custom_variables` | object | **值均为 string**（对象/数组会被 `JSON.stringify`） |
-| `search_network` | string | 如 `disable` |
-| `stream` | string | JSON 模式下前端发 **`disable`**；SSE 兼容模式下为 **`enable`** |
-| `workflow_status` | string | 如 `enable` / `disable`（前端可经注入配置） |
-| `tcadp_user_id` | string | 常为空串 |
-| `model` | string | 可选顶层字段；课堂缺省为 `李大志` |
-| `proactive` | boolean | **仅课堂**请求体可能出现 |
+| `content` | string | 用户侧正文；文档分析场景为 **文件 URL** |
+| `message` | string | 与正文一致或为用户提示；文档分析可与 `content` 不同 |
+| `evaluation` | boolean | 报告类意图为 `true`；普通对话 / 文档分析一般为 `false`（勿把该键留在 `custom_variables`，前端会抽出到顶层） |
+| `custom_variables` | object | **值均为 string**（对象/数组会先 `JSON.stringify`） |
+| `stream` | string | JSON 模式：`disable`；`VITE_BACKEND_USE_JSON_RESPONSE=false` 时：`enable`（SSE） |
+| `visitor_id` | string | **可选**；由 `VITE_*_VISITOR_BIZ_ID` / `VITE_DOC_VISITOR_BIZ_ID` 等非空时写入，字符清洗同 `session_id` 规则 |
+| `model` | string | **可选**；课堂在缺省时前端会补 `"李大志"`；若来自 `custom_variables.model`，前端会提升到顶层且不再重复写入 `custom_variables` |
+| `proactive` | boolean | **仅课堂**：`true` 表示主动轮询类场景 |
+
+**已移除的前端字段**（若旧网关仍依赖，请在后端自行映射）：`bot_app_key`、`visitor_biz_id`、`workflow_status`、`incremental`、`tcadp_user_id`、`search_network` 等。
 
 ---
 
@@ -197,21 +277,25 @@
 
 ## 9. 后端路由映射示例
 
-以下仅为 **约定示例**，可通过环境变量改路径：
+以下仅为 **约定示例**（`BASE=/api` 时）；路径均可通过 `VITE_BACKEND_PATH_*` 覆盖。
 
-| 能力 | 浏览器最终 URL 示例（`BASE=/api`） |
-|------|-----------------------------------|
+| 能力 | 浏览器最终 URL 示例 |
+|------|---------------------|
 | 专项对话 | `POST /api/simu/special/chat` |
 | 课堂对话 | `POST /api/simu/classroom/chat` |
 | 训练报告 | `POST /api/simu/report` |
-| 文档分析 | `POST /api/simu/doc/chat` |
+| 文档分析（**默认一步**） | `POST /api/simu/doc/analyze`（`multipart/form-data`，字段 `file`） |
+| 文档分析（**两步**：上传） | `POST /api/simu/doc/upload` |
+| 文档分析（**两步**：分析） | `POST /api/simu/doc/chat`（JSON，见 §6） |
 
-网关可将 `/api` 反代到内网 `http://simu-backend:8787/`，由容器间网络访问，无需浏览器直连内网地址。
+网关可将 `/api` 反代到内网（如 `http://simu-backend:8787/`），由服务端访问内网，无需浏览器直连。
 
 ---
 
 ## 10. 版本与兼容
 
-- 本文档与仓库中 `vendor/front/js/workflow.js`、`src/classroom-workflow-inject.js` 行为一致；若前端升级导致字段增减，请同步更新本文档版本号。
+- 本文档与 `vendor/front/js/workflow.js`、`src/classroom-workflow-inject.js`、`TeachingDocAnalysis.vue` 保持一致；字段有变时请同步改版本号并更新 **§1 / §6**。
 
-**文档版本**：1.1（默认 JSON 响应；SSE 为可选兼容）
+**文档版本：1.5.1**（润色接入指引与路由表；正文约定同 1.5）
+
+**本地开发 · 训练报告**：未配置 `VITE_BACKEND_BASE_URL` 时，若 `VITE_REPORT_HTTP_URL` 也为空，开发模式下报告请求会指向同源 **`/api/report`**。只有在 `.env` 中设置 **`VITE_REPORT_PROXY_TARGET`**（上游根 URL，无尾 `/`）时，Vite 才会为 `/api/report` 注册反向代理；否则请直接配置完整的 **`VITE_REPORT_HTTP_URL`**。

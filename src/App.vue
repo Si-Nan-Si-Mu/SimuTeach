@@ -59,7 +59,7 @@ const initialEmotionByStudentId = {
   xiaorou: { joy: 45, activation: 40, anxiety: 55 }
 }
 
-// 工作流会话 id（每次切换学生时重建）
+// 对话会话 id（每次切换学生时重建）
 const sessionId = ref(`sess_${Date.now()}_${selectedStudent.value.id}`)
 
 // 按人格分桶的对话历史（切换人格互不混入；发报告时再合并）
@@ -111,7 +111,7 @@ function setupWorkflowAdapters() {
   if (typeof window === 'undefined') return
   if (!specialRef.value) return
 
-  // 工作流代码会用 window.ChatEngine 做写入/加载态回调
+  // vendor/front/js/workflow.js 会用 window.ChatEngine 做写入/加载态回调
   window.ChatEngine = window.ChatEngine || {}
   window.ChatEngine.showWorkflowLoading = (show) => specialRef.value?.showWorkflowLoading?.(show)
   window.ChatEngine.addWorkflowReply = () => {
@@ -120,7 +120,7 @@ function setupWorkflowAdapters() {
   window.ChatEngine.finalizeWorkflowReply = () => {}
   window.ChatEngine.addSystemMessage = (text) => specialRef.value?.appendSystem?.(text)
 
-  // 工作流代码会用 window.EmotionDashboard 把 emotion/x-debug 写入图表
+  // workflow.js 会用 window.EmotionDashboard 把 emotion/x-debug 写入图表
   window.EmotionDashboard = window.EmotionDashboard || {}
   window.EmotionDashboard.updateBars = (mapped) => {
     emotion.value = { ...mapped }
@@ -213,7 +213,7 @@ const onSend = async ({ text, trigger }) => {
     return
   }
 
-  // 工作流无返回：可选关闭「本地模拟学生回复」（autoAppendReply=false）
+  // 后端无返回：可选关闭「本地模拟学生回复」（autoAppendReply=false）
   if (wfConfig?.autoAppendReply === false) {
     return
   }
@@ -1064,7 +1064,7 @@ function showWorkflowDataModal() {
 
   const listHtml =
     list.length === 0
-      ? '<div class="workflow-data-empty">暂无工作流返回数据，对话中触发的智能体回复会自动记录于此。</div>'
+      ? '<div class="workflow-data-empty">暂无接口返回记录，对话中的智能体回复会自动记录于此。</div>'
       : list
           .map((r, i) => {
             const reqShort = (r.request || '').slice(0, 80) + ((r.request || '').length > 80 ? '…' : '')
@@ -1088,7 +1088,7 @@ function showWorkflowDataModal() {
   modal.innerHTML = `
     <div class="workflow-data-container">
       <button class="workflow-data-close" aria-label="关闭" type="button">✕</button>
-      <h2 class="workflow-data-title">📁 工作流返回数据</h2>
+      <h2 class="workflow-data-title">📁 对话接口记录</h2>
       <p class="workflow-data-desc">共 ${list.length} 条，可导出为 JSON 文件保存。</p>
       <div class="workflow-data-list">${listHtml}</div>
       <div class="workflow-data-actions">
@@ -1111,7 +1111,7 @@ function showWorkflowDataModal() {
   })
 
   modal.querySelector('#workflow-data-clear')?.addEventListener('click', () => {
-    if (list.length && !confirm('确定清空所有工作流数据？')) return
+    if (list.length && !confirm('确定清空所有接口记录？')) return
     store.clear?.()
     showWorkflowDataModal()
   })

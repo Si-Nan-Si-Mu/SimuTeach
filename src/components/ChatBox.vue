@@ -482,7 +482,7 @@ onBeforeUnmount(() => {
               </div>
             </template>
 
-            <!-- 智能体工作流回复 -->
+            <!-- 智能体回复 -->
             <div v-if="m.role === 'workflow' && !(m.avatar && m.name)" class="msg-avatar workflow-avatar">🤖</div>
             <div v-if="m.role === 'workflow' && !(m.avatar && m.name)" class="msg-bubble workflow-bubble">
               <div class="msg-label">智能体</div>
