@@ -5,7 +5,7 @@ import App from './App.vue'
 // 课堂模拟独立 Bot：必须在 workflow.js 之前注入
 import './classroom-workflow-inject.js'
 
-// 工作流（腾讯云 SSE）：通过 window 注入 WorkflowClient / WorkflowDataStore（源码在 vendor/front/js）
+// 对话 / 报告客户端：通过 window 注入 WorkflowClient（默认请求由 VITE_BACKEND_BASE_URL 指向的后端，见 classroom-workflow-inject.js）
 import '../vendor/front/js/workflow.js'
 
 async function buildCursorDataUrl(src, size = 32) {

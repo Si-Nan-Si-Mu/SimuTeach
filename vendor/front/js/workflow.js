@@ -1,7 +1,7 @@
 /**
- * 工作流对接模块
- * - 把前端对话数据推送到腾讯云智能体 HTTP SSE 接口
- * - 文档：https://cloud.tencent.com/document/product/1759/105561
+ * 对话 / 课堂 / 报告 网络层
+ * - 默认不在此文件写死腾讯云地址；由 `src/classroom-workflow-inject.js` 注入 proxyUrl（推荐：同源或 VITE_BACKEND_BASE_URL 后端）。
+ * - 旧版直连腾讯云 qbot SSE 仅作兼容：需在 .env 中显式配置 VITE_SPECIAL_ENDPOINT 等（勿把密钥提交到 Git）。
  */
 import {
   deepExtractAssistantDialogFromObject,
@@ -10,11 +10,14 @@ import {
 } from '../../../src/extractCompletionDialog.js';
 
 const WORKFLOW_CONFIG = {
-  // 对话端 HTTP SSE 接口地址（腾讯云智能体官方）
-  endpoint: 'https://wss.lke.cloud.tencent.com/v1/qbot/chat/sse',
+  /** 直连上游 SSE（已关闭默认）；请使用注入的 proxyUrl 或配置 VITE_BACKEND_BASE_URL */
+  endpoint: '',
 
-  // 应用密钥（bot_app_key）：勿写入仓库；由 `src/classroom-workflow-inject.js` 从 VITE_SPECIAL_BOT_APP_KEY 注入
+  // 应用密钥（bot_app_key）：勿写入仓库；后端代理模式下留空，由 `classroom-workflow-inject` 注入 apiKey 走 Authorization
   botAppKey: '',
+
+  /** 可选：与后端约定的 Bearer Token（VITE_BACKEND_API_KEY） */
+  apiKey: '',
 
   // 访客 ID，2-64 位，仅 [a-zA-Z0-9_-]
   visitorBizId: 'teacher-001',
@@ -40,6 +43,7 @@ const REPORT_WORKFLOW_CONFIG = {
   endpoint: WORKFLOW_CONFIG.endpoint,
   // 历史工作流报告 Bot；勿写入仓库。需要时由 __REPORT_WORKFLOW_INJECT__.botAppKey（VITE_REPORT_BOT_APP_KEY）注入
   botAppKey: '',
+  apiKey: '',
   visitorBizId: WORKFLOW_CONFIG.visitorBizId,
   workflowStatus: WORKFLOW_CONFIG.workflowStatus,
   proxyUrl: WORKFLOW_CONFIG.proxyUrl,
@@ -66,6 +70,7 @@ const REPORT_WORKFLOW_CONFIG = {
 const CLASSROOM_WORKFLOW_CONFIG = {
   endpoint: WORKFLOW_CONFIG.endpoint,
   botAppKey: '',
+  apiKey: '',
   visitorBizId: 'classroom_teacher_001',
   workflowStatus: WORKFLOW_CONFIG.workflowStatus,
   proxyUrl: WORKFLOW_CONFIG.proxyUrl,
@@ -75,6 +80,7 @@ const CLASSROOM_WORKFLOW_CONFIG = {
 function _mergeWorkflowInjectInto(config, inj, logPrefix) {
   try {
     if (!inj || typeof inj !== 'object') return;
+    if (inj.apiKey != null) config.apiKey = String(inj.apiKey).trim();
     if (inj.botAppKey) config.botAppKey = String(inj.botAppKey).trim();
     if (typeof inj.debug === 'boolean') config.debug = inj.debug;
     if (inj.visitorBizId) {
@@ -121,6 +127,12 @@ function _mergeWorkflowInjectInto(config, inj, logPrefix) {
     console.warn('[ReportWorkflow] 合并 HTTP 报告配置失败:', e);
   }
 })();
+
+function _workflowAuthHeaders(config) {
+  const k = config && config.apiKey != null ? String(config.apiKey).trim() : '';
+  if (!k) return {};
+  return { Authorization: 'Bearer ' + k };
+}
 
 /** 报告接口可选字段：temperature / top_p / max_tokens / stream / user */
 function _appendReportChatCompletionOptions(body, cfg, meta) {
@@ -828,6 +840,7 @@ const WorkflowClient = {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           'Accept': 'text/event-stream; charset=utf-8',
+          ..._workflowAuthHeaders(WORKFLOW_CONFIG),
         },
         body: utf8Bytes,
       });
@@ -928,12 +941,6 @@ const WorkflowClient = {
    */
   async sendClassroomBroadcast(sessionId, message, extra = {}) {
     const config = CLASSROOM_WORKFLOW_CONFIG;
-    if (!config.botAppKey) {
-      console.warn(
-        '[ClassroomWorkflow] 未配置 botAppKey。请在 .env.local 中设置 VITE_CLASSROOM_BOT_APP_KEY（勿将密钥提交到 Git）。'
-      );
-      return null;
-    }
     const url = config.proxyUrl || config.endpoint;
     if (!url) {
       _wfClassroomLog('未配置 endpoint，已跳过');
@@ -969,6 +976,7 @@ const WorkflowClient = {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           Accept: 'text/event-stream; charset=utf-8',
+          ..._workflowAuthHeaders(config),
         },
         body: new TextEncoder().encode(JSON.stringify(body)),
       });
@@ -1095,6 +1103,7 @@ const WorkflowClient = {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           'Accept': 'text/event-stream; charset=utf-8',
+          ..._workflowAuthHeaders(WORKFLOW_CONFIG),
         },
         body: utf8Bytes,
       });
@@ -1301,15 +1310,13 @@ window.WorkflowDataStore = WorkflowDataStore;
 
 _wfLog('工作流模块已加载，请求地址:', WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint, 'debug:', WORKFLOW_CONFIG.debug);
 _wfLog(
-  '专项模拟工作流:',
-  WORKFLOW_CONFIG.botAppKey
-    ? '已注入/存在 botAppKey（长度 ' + WORKFLOW_CONFIG.botAppKey.length + '），调试标签 [Workflow]'
-    : '未注入 botAppKey——请在 .env.local 设置 VITE_SPECIAL_BOT_APP_KEY'
+  '专项对话请求:',
+  (WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint || '(未配置 URL)')
+    + (WORKFLOW_CONFIG.apiKey ? '，已配置后端 Bearer' : WORKFLOW_CONFIG.botAppKey ? '，已配置 botAppKey' : '，未配置鉴权字段')
 );
 _wfClassroomLog(
-  '课堂模拟工作流:',
-  CLASSROOM_WORKFLOW_CONFIG.botAppKey
-    ? '已注入 botAppKey（长度 ' + CLASSROOM_WORKFLOW_CONFIG.botAppKey.length + '），调试标签 [ClassroomWorkflow]'
-    : '未注入 botAppKey——请在 .env.local 设置 VITE_CLASSROOM_BOT_APP_KEY'
+  '课堂对话请求:',
+  (CLASSROOM_WORKFLOW_CONFIG.proxyUrl || CLASSROOM_WORKFLOW_CONFIG.endpoint || '(未配置 URL)')
+    + (CLASSROOM_WORKFLOW_CONFIG.apiKey ? '，已配置后端 Bearer' : CLASSROOM_WORKFLOW_CONFIG.botAppKey ? '，已配置 botAppKey' : '，未配置鉴权字段')
 );
 

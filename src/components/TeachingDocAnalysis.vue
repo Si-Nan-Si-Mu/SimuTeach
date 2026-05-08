@@ -10,7 +10,15 @@ const FILE_RULES = [
   { exts: ['jpg', 'jpeg', 'png'], maxMb: 50 },
 ]
 const ACCEPT_TYPES = FILE_RULES.flatMap((rule) => rule.exts.map((ext) => `.${ext}`)).join(',')
-// 固定使用官方 qbot SSE 地址
+/** 统一后端：与 classroom-workflow-inject 一致，文档分析走此后端路径（SSE 或 JSON 由后端决定） */
+const BACKEND_BASE = String(import.meta.env.VITE_BACKEND_BASE_URL || '')
+  .trim()
+  .replace(/\/+$/, '')
+const BACKEND_API_KEY = String(import.meta.env.VITE_BACKEND_API_KEY || '').trim()
+const BACKEND_PATH_DOC = String(import.meta.env.VITE_BACKEND_PATH_DOC || '/simu/doc/chat').trim()
+/** 走后端时是否仍发送与 qbot 同构的 JSON 请求体（默认 true，便于后端转发腾讯云） */
+const BACKEND_DOC_QBOT_SHAPED_BODY = import.meta.env.VITE_BACKEND_DOC_QBOT_BODY !== 'false'
+
 const DOC_WORKFLOW_API_KEY = import.meta.env.VITE_DOC_WORKFLOW_API_KEY?.trim() || ''
 const DOC_WORKFLOW_AUTHORIZATION = import.meta.env.VITE_DOC_WORKFLOW_AUTHORIZATION?.trim() || ''
 const DOC_WORKFLOW_APP_KEY = import.meta.env.VITE_DOC_BOT_APP_KEY?.trim() || ''
@@ -30,8 +38,9 @@ const DOC_SSE_MODEL_NAME = import.meta.env.VITE_DOC_SSE_MODEL_NAME?.trim() || ''
 const DOC_QBOT_SSE_WORKFLOW_STATUS =
   import.meta.env.VITE_DOC_WORKFLOW_STATUS?.trim() || 'enable'
 
+/** 已关闭浏览器直连腾讯云；未配置 BACKEND_BASE 时返回空，需显式配置 VITE_DOC_WORKFLOW_ENDPOINT 或后端 */
 function getQbotSseFallbackUrl() {
-  return 'https://wss.lke.cloud.tencent.com/v1/qbot/chat/sse'
+  return ''
 }
 
 function getDocBotAppKey() {
@@ -43,8 +52,17 @@ function getDocBotAppKey() {
   return ''
 }
 
-/** 固定使用官方 qbot SSE，不再按优先级解析其它地址 */
+function joinBackendPath(base, path) {
+  const p = String(path || '').trim()
+  if (!p) return base
+  const seg = p.startsWith('/') ? p : '/' + p
+  return base + seg
+}
+
 function resolveDocWorkflowEndpoint(_extra) {
+  if (BACKEND_BASE) return joinBackendPath(BACKEND_BASE, BACKEND_PATH_DOC)
+  const explicit = String(import.meta.env.VITE_DOC_WORKFLOW_ENDPOINT || '').trim()
+  if (explicit) return explicit
   return getQbotSseFallbackUrl()
 }
 
@@ -1569,7 +1587,8 @@ function buildDocQbotSseBody(fileUrl, _messageIgnored, fileName, baseExtra = {})
     content: contentStr,
     message: contentStr,
     session_id,
-    bot_app_key: getDocBotAppKey(),
+    // 后端代理模式下不在浏览器携带 bot_app_key（由服务端注入）
+    bot_app_key: BACKEND_BASE ? '' : getDocBotAppKey(),
     visitor_biz_id: normalizeVisitorBizId(DOC_SSE_VISITOR_BIZ_ID),
     incremental: true,
     streaming_throttle: 10,
@@ -1859,7 +1878,9 @@ async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
     throw new Error('未配置工作流地址')
   }
   const isWorkflowTrigger = /\/v1\/workflows\/.+\/trigger(?:\?|$)/.test(endpoint)
-  const isQbotSseEndpoint = /\/v1\/qbot\/chat\/sse(?:\?|$)/.test(endpoint)
+  const isQbotSseEndpoint =
+    /\/v1\/qbot\/chat\/sse(?:\?|$)/.test(endpoint) ||
+    (!!BACKEND_BASE && BACKEND_DOC_QBOT_SHAPED_BODY)
   const baseExtra = { ...extra }
   delete baseExtra._workflowEndpoint
 
@@ -1877,14 +1898,17 @@ async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
         ...stringifyCustomVariables(baseExtra),
       }
 
-  const authorization = DOC_WORKFLOW_AUTHORIZATION
-    ? DOC_WORKFLOW_AUTHORIZATION
-    : DOC_WORKFLOW_API_KEY
-      ? `Bearer ${DOC_WORKFLOW_API_KEY}`
-      : DOC_WORKFLOW_APP_KEY
-        ? `Bearer ${DOC_WORKFLOW_APP_KEY}`
-        : ''
-  const attachWorkflowAuth = !!authorization && !isQbotSseEndpoint
+  const authorization = BACKEND_API_KEY
+    ? `Bearer ${BACKEND_API_KEY}`
+    : DOC_WORKFLOW_AUTHORIZATION
+      ? DOC_WORKFLOW_AUTHORIZATION
+      : DOC_WORKFLOW_API_KEY
+        ? `Bearer ${DOC_WORKFLOW_API_KEY}`
+        : DOC_WORKFLOW_APP_KEY
+          ? `Bearer ${DOC_WORKFLOW_APP_KEY}`
+          : ''
+  const attachWorkflowAuth =
+    (!!authorization && !isQbotSseEndpoint) || (!!BACKEND_BASE && !!BACKEND_API_KEY && isQbotSseEndpoint)
   const contentType = isWorkflowTrigger
     ? 'text/plain; charset=utf-8'
     : 'application/json; charset=utf-8'
