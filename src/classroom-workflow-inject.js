@@ -21,6 +21,11 @@ function joinBackendUrl(base, path) {
 
 const BACKEND_BASE = trimSlash((import.meta.env.VITE_BACKEND_BASE_URL || '').trim())
 const BACKEND_API_KEY = (import.meta.env.VITE_BACKEND_API_KEY || '').trim()
+/** 配置统一后端时默认走 JSON 单次响应（非 SSE）；设为 false 可恢复 Accept: text/event-stream */
+const BACKEND_PREFER_JSON =
+  BACKEND_BASE && import.meta.env.VITE_BACKEND_USE_JSON_RESPONSE !== 'false'
+/** 未配置 BASE 时仅当显式 true 才启用 JSON 模式（旧版直连腾讯云多为 SSE） */
+const LEGACY_PREFER_JSON = !BACKEND_BASE && import.meta.env.VITE_BACKEND_USE_JSON_RESPONSE === 'true'
 
 /** 默认不带 /api 前缀，便于 BASE=/api 时得到 /api/simu/...；若服务挂在 8787 根路径下的 /api，可把 BASE 设为 http://127.0.0.1:8787/api */
 const PATH_SPECIAL = (import.meta.env.VITE_BACKEND_PATH_SPECIAL || '/simu/special/chat').trim()
@@ -31,6 +36,7 @@ if (BACKEND_BASE) {
   window.__WORKFLOW_INJECT__ = {
     apiKey: BACKEND_API_KEY,
     botAppKey: '',
+    preferJsonResponse: BACKEND_PREFER_JSON,
     debug: import.meta.env.VITE_SPECIAL_WORKFLOW_DEBUG !== 'false',
     autoAppendReply: import.meta.env.VITE_SPECIAL_AUTO_APPEND_REPLY !== 'false',
     visitorBizId: import.meta.env.VITE_SPECIAL_VISITOR_BIZ_ID || '',
@@ -41,6 +47,7 @@ if (BACKEND_BASE) {
   window.__CLASSROOM_WORKFLOW_INJECT__ = {
     apiKey: BACKEND_API_KEY,
     botAppKey: '',
+    preferJsonResponse: BACKEND_PREFER_JSON,
     debug: import.meta.env.VITE_CLASSROOM_WORKFLOW_DEBUG !== 'false',
     visitorBizId: import.meta.env.VITE_CLASSROOM_VISITOR_BIZ_ID || '',
     proxyUrl: joinBackendUrl(BACKEND_BASE, PATH_CLASSROOM),
@@ -67,6 +74,7 @@ if (BACKEND_BASE) {
 } else {
   window.__WORKFLOW_INJECT__ = {
     botAppKey: import.meta.env.VITE_SPECIAL_BOT_APP_KEY || '',
+    preferJsonResponse: LEGACY_PREFER_JSON,
     debug: import.meta.env.VITE_SPECIAL_WORKFLOW_DEBUG !== 'false',
     autoAppendReply: import.meta.env.VITE_SPECIAL_AUTO_APPEND_REPLY !== 'false',
     visitorBizId: import.meta.env.VITE_SPECIAL_VISITOR_BIZ_ID || '',
@@ -103,6 +111,7 @@ if (BACKEND_BASE) {
 
   window.__CLASSROOM_WORKFLOW_INJECT__ = {
     botAppKey: import.meta.env.VITE_CLASSROOM_BOT_APP_KEY || '',
+    preferJsonResponse: LEGACY_PREFER_JSON,
     debug: import.meta.env.VITE_CLASSROOM_WORKFLOW_DEBUG !== 'false',
     visitorBizId: import.meta.env.VITE_CLASSROOM_VISITOR_BIZ_ID || '',
     proxyUrl: import.meta.env.VITE_CLASSROOM_PROXY_URL || '',

@@ -1,13 +1,24 @@
 # SimuTeach（teacher-training-agent）
 
-面向师范生训练的 **Vue 3 + Vite** 单页应用：专项一对一对话、三人格课堂仿真、教学资料分析，经 **HTTP / SSE** 对接工作流与直连评估接口。图表使用本地 **ECharts**（`vendor` 脚本，经运行时注入挂载 `window.echarts`，非 `echarts` npm 主包）。
+面向师范生训练的 **Vue 3 + Vite** 单页应用：专项一对一对话、三人格课堂仿真、教学资料分析；智能体能力经 **自建后端 HTTP JSON** 接入（默认 **非 SSE**），训练报告走独立 JSON 接口。图表使用本地 **ECharts**（`vendor` 脚本，经运行时注入挂载 `window.echarts`，非 `echarts` npm 主包）。
 
-**仓库**：<https://github.com/Selenego/Train>（`git@github.com:Selenego/Train.git`）
+**主仓库**：<https://github.com/Si-Nan-Si-Mu/SimuTeach>（`git@github.com:Si-Nan-Si-Mu/SimuTeach.git`）
+
+---
+
+## 近期变更摘要（后端接入）
+
+- **统一后端**：在 `.env.local` 配置 `VITE_BACKEND_BASE_URL`（及可选 `VITE_BACKEND_API_KEY`）后，专项对话、课堂对话、训练报告、文档分析请求均发往该前缀下的路径（默认 `/simu/special/chat`、`/simu/classroom/chat`、`/simu/report`、`/simu/doc/chat`，均可覆盖）。详见 **`src/classroom-workflow-inject.js`**。
+- **默认 JSON、取消 SSE**：配置统一后端且 **未** 将 `VITE_BACKEND_USE_JSON_RESPONSE` 设为 `false` 时，对话类请求使用 `Accept: application/json`，请求体中 `stream: disable`，响应按 **单次 JSON** 解析（含 Chat Completions 形与 `x-debug` 情绪字段）。需要兼容腾讯云式流式时再设 `VITE_BACKEND_USE_JSON_RESPONSE=false`。实现见 **`vendor/front/js/workflow.js`**。
+- **对接规范**：后端可自行实现路由与鉴权，与前端约定见 **`docs/BACKEND_INTEGRATION_SPEC.md`**（请求体字段、`Authorization`、响应形状等）。
+
+---
 
 **延伸阅读（`docs/`）**
 
 | 文档 | 用途 |
 |------|------|
+| [**`docs/BACKEND_INTEGRATION_SPEC.md`**](docs/BACKEND_INTEGRATION_SPEC.md) | **后端配置与数据交互规范**（路径、JSON/SSE 开关、qbot 形请求体、报告接口） |
 | [`docs/前端方案说明书.md`](docs/前端方案说明书.md) | 交付与评审：架构、能力、与后端协作要点 |
 | [`docs/mindmap-rendering-architecture.md`](docs/mindmap-rendering-architecture.md) | 教学文档分析：思维导图数据流、ECharts 树图与 Markdown/PDF/JSON 导出 |
 | [`docs/SimuTeach-实际系统架构.md`](docs/SimuTeach-实际系统架构.md) | 系统架构与模块关系（纲要） |
@@ -55,7 +66,7 @@
 - 图表：`vendor/front/js/echarts.min.js`（运行时 `<script>` 注入，`window.echarts`）
 - PDF 导出：`html2pdf.js`（npm 依赖，构建时按需分包）
 - 样式：`vendor/front/css/style.css` + 各组件样式（部分页面含全局与 `--app-*` 变量）
-- 协议：`HTTP JSON`、`HTTP SSE`（`text/event-stream`）
+- 与智能体通信：**HTTP JSON**（默认）；可选 **HTTP SSE**（`VITE_BACKEND_USE_JSON_RESPONSE=false` 或未配置统一后端且直连腾讯云时）
 
 ---
 
@@ -91,7 +102,7 @@ npm install
 | 路径 | 用途 |
 |------|------|
 | `vendor/front/js/echarts.min.js` | ECharts，教学报告 / 教学文档分析导图等 |
-| `vendor/front/js/workflow.js` | 腾讯云 qbot SSE 等（由 `src/main.js` 引入） |
+| `vendor/front/js/workflow.js` | 对话 / 课堂 / 报告 HTTP 客户端（由 `src/main.js` 引入） |
 | `vendor/front/css/style.css` | 全局与报告等基础样式 |
 | `public/avatars/*.png` | 三人格带头像等静态资源 |
 | `public/icons/*.png` | 课堂与情绪等图标（若引用） |
@@ -103,7 +114,7 @@ npm install
 1. `node -v`、`npm -v` 正常。  
 2. 根目录执行 `npm ci` 或 `npm install`。  
 3. 存在 `vendor/front/js/echarts.min.js` 与 `vendor/front/js/workflow.js`。  
-4. 复制 **`.env.example` → `.env.local`** 并填写各 `VITE_*`。  
+4. 复制 **`.env.example` → `.env.local`** 并填写各 `VITE_*`（**勿提交** `.env.local`）。  
 5. `npm run dev` 能启动；`npm run build` 能产出 `dist/`。  
 
 ---
@@ -118,7 +129,12 @@ npm install
 
 ### 2) 配置环境变量
 
-将 `.env.example` 复制为 `.env.local` 并填写（勿将 `.env.local` 提交到 Git）。分组说明见文件内注释。
+将 `.env.example` 复制为 `.env.local` 并填写。统一后端至少配置：
+
+- `VITE_BACKEND_BASE_URL` — 如 `http://127.0.0.1:8787` 或同源 `/api`
+- `VITE_BACKEND_API_KEY` — 可选 Bearer
+
+完整说明与路径覆盖见 **`.env.example`** 与 **`docs/BACKEND_INTEGRATION_SPEC.md`**。
 
 ### 3) 启动开发环境
 
@@ -152,7 +168,7 @@ npm run preview
 ```text
 teacher-training-agent/
 ├─ public/                    # 静态资源：avatars、icons、favicon
-├─ docs/                      # 方案、架构、思维导图专题等
+├─ docs/                      # 方案、架构、**后端对接规范**等
 ├─ front/                     # 历史/备用静态页与脚本（主入口为根目录 Vite 应用）
 ├─ vendor/front/
 │  ├─ css/style.css
@@ -199,7 +215,7 @@ teacher-training-agent/
 |------|------|
 | `SpecialTraining.vue` | 专项：对话 + 情绪看板 |
 | `ClassroomSim.vue` | 课堂：讲台/座位/气泡/控制台/报告入口 |
-| `TeachingDocAnalysis.vue` | 文档上传、SSE、导图、导出 |
+| `TeachingDocAnalysis.vue` | 文档上传、分析请求、导图、导出 |
 | `EmotionPanel.vue` | 专项情绪与图表 |
 | `ChatBox.vue` | 专项对话与顶栏学生信息 |
 | `SideBar.vue` | 模式、学生、工作流数据（底部） |
@@ -208,9 +224,9 @@ teacher-training-agent/
 
 ## 环境变量
 
-以 **`.env.example`** 为准，常见前缀：`VITE_SPECIAL_*`、`VITE_CLASSROOM_*`、`VITE_REPORT_*`、`VITE_DOC_*`。
+以 **`.env.example`** 为准。统一后端相关：`VITE_BACKEND_BASE_URL`、`VITE_BACKEND_API_KEY`、`VITE_BACKEND_PATH_*`、`VITE_BACKEND_USE_JSON_RESPONSE` 等。
 
-生产环境建议经网关或后端代理智能体与报告接口，减少浏览器直暴露密钥。
+生产环境建议经网关将 `/api` 反代到后端，减少浏览器直暴露密钥；约定见 **`docs/BACKEND_INTEGRATION_SPEC.md`**。
 
 ---
 
@@ -220,11 +236,11 @@ teacher-training-agent/
 
 | 前缀 | 含义 |
 |------|------|
-| `[Workflow]` | 专项等工作流 |
+| `[Workflow]` | 专项对话客户端 |
 | `[ClassroomWorkflow]` / `[ClassroomProactive]` | 课堂 |
-| `[ReportDirect]` | 报告直连与弹窗数据 |
+| `[ReportDirect]` | 报告与弹窗数据 |
 
-SSE 问题优先查 `vite.config.js` 代理与后端 CORS。
+JSON 模式下若解析失败，检查响应是否为合法 JSON 及是否与规范中的字段一致。仍使用 SSE 时优先查网关与 CORS。
 
 ---
 
@@ -239,7 +255,7 @@ SSE 问题优先查 `vite.config.js` 代理与后端 CORS。
 
 协议、上传类型、报告或环境变量有变更时，请同步更新：
 
-- 本 README 相应段落与目录结构；  
+- 本 README 与 **`docs/BACKEND_INTEGRATION_SPEC.md`**；  
 - `docs/` 中相关数据流/导出说明；  
 - `.env.example` 注释。  
 

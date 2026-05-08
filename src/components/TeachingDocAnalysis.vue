@@ -15,6 +15,9 @@ const BACKEND_BASE = String(import.meta.env.VITE_BACKEND_BASE_URL || '')
   .trim()
   .replace(/\/+$/, '')
 const BACKEND_API_KEY = String(import.meta.env.VITE_BACKEND_API_KEY || '').trim()
+/** 与 workflow 一致：统一后端默认 JSON 响应，不设为 false 时不请求 SSE */
+const BACKEND_USE_JSON_RESPONSE =
+  !!BACKEND_BASE && import.meta.env.VITE_BACKEND_USE_JSON_RESPONSE !== 'false'
 const BACKEND_PATH_DOC = String(import.meta.env.VITE_BACKEND_PATH_DOC || '/simu/doc/chat').trim()
 /** 走后端时是否仍发送与 qbot 同构的 JSON 请求体（默认 true，便于后端转发腾讯云） */
 const BACKEND_DOC_QBOT_SHAPED_BODY = import.meta.env.VITE_BACKEND_DOC_QBOT_BODY !== 'false'
@@ -1596,7 +1599,7 @@ function buildDocQbotSseBody(fileUrl, _messageIgnored, fileName, baseExtra = {})
     evaluation,
     custom_variables: stringifyCustomVariables(vars),
     search_network: 'disable',
-    stream: 'enable',
+    stream: BACKEND_USE_JSON_RESPONSE ? 'disable' : 'enable',
     workflow_status: DOC_QBOT_SSE_WORKFLOW_STATUS,
     tcadp_user_id: '',
   }
@@ -1923,7 +1926,13 @@ async function sendDocWorkflowWithFileUrl(fileUrl, message, extra = {}) {
     headers: {
       'Content-Type': contentType,
       ...(attachWorkflowAuth ? { Authorization: authorization } : {}),
-      ...(isQbotSseEndpoint ? { Accept: 'text/event-stream; charset=utf-8' } : {}),
+      ...(isQbotSseEndpoint
+        ? {
+            Accept: BACKEND_USE_JSON_RESPONSE
+              ? 'application/json'
+              : 'text/event-stream; charset=utf-8',
+          }
+        : {}),
     },
     body: isWorkflowTrigger ? fileUrl : JSON.stringify(body),
   })

@@ -36,6 +36,9 @@ const WORKFLOW_CONFIG = {
 
   // 专项模拟是否自动回填“学生回复”气泡（false=仅更新右侧看板）
   autoAppendReply: true,
+
+  /** true：请求 Accept 为 JSON，请求体 stream=disable，且不再解析 SSE（由注入/VITE_BACKEND_USE_JSON_RESPONSE 控制） */
+  preferJsonResponse: false,
 };
 
 // 训练报告：默认走直连 HTTP API（见 sendTrainingReport）；以下为历史工作流字段，保留兼容注入
@@ -75,6 +78,7 @@ const CLASSROOM_WORKFLOW_CONFIG = {
   workflowStatus: WORKFLOW_CONFIG.workflowStatus,
   proxyUrl: WORKFLOW_CONFIG.proxyUrl,
   debug: true,
+  preferJsonResponse: false,
 };
 
 function _mergeWorkflowInjectInto(config, inj, logPrefix) {
@@ -93,6 +97,9 @@ function _mergeWorkflowInjectInto(config, inj, logPrefix) {
     if (inj.workflowStatus) config.workflowStatus = inj.workflowStatus;
     if (typeof inj.autoAppendReply === 'boolean' && Object.prototype.hasOwnProperty.call(config, 'autoAppendReply')) {
       config.autoAppendReply = inj.autoAppendReply;
+    }
+    if (typeof inj.preferJsonResponse === 'boolean' && Object.prototype.hasOwnProperty.call(config, 'preferJsonResponse')) {
+      config.preferJsonResponse = inj.preferJsonResponse;
     }
   } catch (e) {
     console.warn('[' + logPrefix + '] 合并前端注入配置失败:', e);
@@ -132,6 +139,13 @@ function _workflowAuthHeaders(config) {
   const k = config && config.apiKey != null ? String(config.apiKey).trim() : '';
   if (!k) return {};
   return { Authorization: 'Bearer ' + k };
+}
+
+function _workflowAcceptHeader(config) {
+  if (config && config.preferJsonResponse) {
+    return 'application/json';
+  }
+  return 'text/event-stream; charset=utf-8';
 }
 
 /** 报告接口可选字段：temperature / top_p / max_tokens / stream / user */
@@ -455,6 +469,41 @@ function _extractDialogAndEmotionFromContent(jsonText) {
   return typeof dialog === 'string' ? dialog : '';
 }
 
+/** 单次 JSON 响应中解析助手正文（含 x-debug 情绪，与 SSE 路径一致） */
+function _parseJsonReplyBodyText(rawText) {
+  const t = String(rawText || '').trim();
+  if (!t) return '';
+  let j;
+  try {
+    j = JSON.parse(t);
+  } catch (_) {
+    return t;
+  }
+  if (!j || typeof j !== 'object') return t;
+  const jsonStr = JSON.stringify(j);
+  let dialog = _extractDialogAndEmotionFromContent(jsonStr);
+  if (!dialog) {
+    dialog =
+      dialogFromCompletionObj(j) ||
+      extractDialogFromCompletionJsonFragment(t) ||
+      deepExtractAssistantDialogFromObject(j) ||
+      '';
+  }
+  if (typeof dialog === 'string' && dialog.trim()) return dialog.trim();
+  const v =
+    j.text ||
+    j.content ||
+    (j.payload && (j.payload.text || j.payload.content)) ||
+    j.reply ||
+    j.message;
+  if (typeof v === 'string' && v) return v;
+  try {
+    return JSON.stringify(j, null, 2);
+  } catch (_) {
+    return t;
+  }
+}
+
 /**
  * 按指定 Bot 配置构造 SSE 请求体（与 WORKFLOW_CONFIG 版字段一致）
  */
@@ -491,7 +540,7 @@ function buildRequestBodyWithConfig(config, client, content, sessionId, customVa
     evaluation,
     custom_variables: client.stringifyCustomVariables(vars),
     search_network: 'disable',
-    stream: 'enable',
+    stream: config.preferJsonResponse ? 'disable' : 'enable',
     workflow_status: config.workflowStatus,
     tcadp_user_id: '',
   };
@@ -804,7 +853,7 @@ const WorkflowClient = {
   },
 
   /**
-   * 老师文本消息：触发 HTTP SSE 对话并展示返回内容
+   * 老师文本消息：POST 对话接口；默认 JSON 单次响应，可选 SSE（preferJsonResponse=false）
    */
   async sendTeacherMessageToWorkflow(sessionId, message, extra = {}) {
     const url = WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint;
@@ -839,7 +888,7 @@ const WorkflowClient = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
-          'Accept': 'text/event-stream; charset=utf-8',
+          Accept: _workflowAcceptHeader(WORKFLOW_CONFIG),
           ..._workflowAuthHeaders(WORKFLOW_CONFIG),
         },
         body: utf8Bytes,
@@ -865,6 +914,27 @@ const WorkflowClient = {
         }
         console.warn('[Workflow] HTTP', res.status, errMsg);
         return null;
+      }
+
+      if (WORKFLOW_CONFIG.preferJsonResponse) {
+        const text = await res.text();
+        _wfLog('JSON 模式响应，body 前 200 字:', text.slice(0, 200));
+        const toShow = _parseJsonReplyBodyText(text);
+        if (WORKFLOW_CONFIG.debug && window.console && console.log) {
+          console.log('[Workflow] JSON 模式解析后长度:', (toShow || '').length);
+        }
+        if (toShow && chat && typeof chat.addWorkflowReply === 'function') {
+          chat.addWorkflowReply(toShow, replyId);
+        } else if (chat && typeof chat.addSystemMessage === 'function') {
+          chat.addSystemMessage('⚠️ 工作流返回格式异常，请确认后端返回 JSON。');
+        }
+        if (chat && typeof chat.finalizeWorkflowReply === 'function') {
+          chat.finalizeWorkflowReply(replyId);
+        }
+        if (toShow && window.WorkflowDataStore && typeof window.WorkflowDataStore.add === 'function') {
+          window.WorkflowDataStore.add(sessionId, message, toShow, extra);
+        }
+        return toShow || null;
       }
 
       const contentType = (res.headers.get('Content-Type') || '').toLowerCase();
@@ -975,7 +1045,7 @@ const WorkflowClient = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
-          Accept: 'text/event-stream; charset=utf-8',
+          Accept: _workflowAcceptHeader(config),
           ..._workflowAuthHeaders(config),
         },
         body: new TextEncoder().encode(JSON.stringify(body)),
@@ -1003,6 +1073,23 @@ const WorkflowClient = {
           }
         } catch (_) {}
         return null;
+      }
+
+      if (config.preferJsonResponse) {
+        const text = await res.text();
+        _wfClassroomLog('JSON 模式响应，body 前 180 字:', text.slice(0, 180));
+        const toShow = _parseJsonReplyBodyText(text);
+        try {
+          if (window.ClassroomWorkflowHooks && typeof window.ClassroomWorkflowHooks.onFinalize === 'function') {
+            window.ClassroomWorkflowHooks.onFinalize(toShow || '', { replyId, jsonMode: true });
+          }
+        } catch (_) {}
+        if (toShow && window.WorkflowDataStore && typeof window.WorkflowDataStore.add === 'function') {
+          try {
+            window.WorkflowDataStore.add(sessionId, message, toShow, { ...extra, channel: 'classroom', jsonMode: true });
+          } catch (_) {}
+        }
+        return toShow || null;
       }
 
       if (!res.body) {
@@ -1102,14 +1189,13 @@ const WorkflowClient = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
-          'Accept': 'text/event-stream; charset=utf-8',
+          Accept: _workflowAcceptHeader(WORKFLOW_CONFIG),
           ..._workflowAuthHeaders(WORKFLOW_CONFIG),
         },
         body: utf8Bytes,
       });
       const text = await res.text();
       if (WORKFLOW_CONFIG.debug && window.console && console.log) {
-        // 仅在 debug 模式下输出简要状态，避免在控制台刷出完整 SSE 内容
         console.log('[Workflow] 人格切换完成，status =', res.status, 'model =', modelName);
       }
       return text;
@@ -1310,9 +1396,17 @@ window.WorkflowDataStore = WorkflowDataStore;
 
 _wfLog('工作流模块已加载，请求地址:', WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint, 'debug:', WORKFLOW_CONFIG.debug);
 _wfLog(
+  '专项对话:',
+  WORKFLOW_CONFIG.preferJsonResponse ? 'JSON 单次响应（Accept: application/json，stream=disable）' : 'SSE（Accept: text/event-stream）'
+);
+_wfLog(
   '专项对话请求:',
   (WORKFLOW_CONFIG.proxyUrl || WORKFLOW_CONFIG.endpoint || '(未配置 URL)')
     + (WORKFLOW_CONFIG.apiKey ? '，已配置后端 Bearer' : WORKFLOW_CONFIG.botAppKey ? '，已配置 botAppKey' : '，未配置鉴权字段')
+);
+_wfClassroomLog(
+  '课堂对话:',
+  CLASSROOM_WORKFLOW_CONFIG.preferJsonResponse ? 'JSON 单次响应' : 'SSE'
 );
 _wfClassroomLog(
   '课堂对话请求:',

@@ -1,6 +1,6 @@
-# SimuTeach 后端对接规范
+﻿# SimuTeach 后端对接规范
 
-本文档描述 **SimuTeach 前端（Vue + Vite）** 在配置 `VITE_BACKEND_BASE_URL` 时，对统一后端的 **URL 约定、鉴权、请求体与响应（含 SSE）** 要求。后端可按自身架构调整路由前缀，只需与前端环境变量中的 `BASE` 与 `VITE_BACKEND_PATH_*` 对齐。
+本文档描述 **SimuTeach 前端（Vue + Vite）** 在配置 `VITE_BACKEND_BASE_URL` 时，对统一后端的 **URL 约定、鉴权、请求体与响应格式** 要求。默认 **单次 JSON 响应**（`Accept: application/json`，请求体 `stream: disable`），不再建立 SSE 长连接；仅在 `VITE_BACKEND_USE_JSON_RESPONSE=false` 时前端仍可按 SSE 解析（兼容旧腾讯云 qbot）。后端可按自身架构调整路由前缀，只需与 `BASE` 与 `VITE_BACKEND_PATH_*` 对齐。
 
 **实现参考（源码）**
 
@@ -20,6 +20,7 @@
 | `VITE_BACKEND_PATH_CLASSROOM` | 课堂模拟对话 | 默认 `/simu/classroom/chat` |
 | `VITE_BACKEND_PATH_REPORT` | 训练报告 HTTP | 默认 `/simu/report`；若需 `/api/report` 可设 `BASE=/api` 且 `PATH_REPORT=/report` |
 | `VITE_BACKEND_PATH_DOC` | 文档分析（仅 `TeachingDocAnalysis`） | 默认 `/simu/doc/chat` |
+| `VITE_BACKEND_USE_JSON_RESPONSE` | 为 `false` 时专项/课堂/文档分析恢复 **SSE**（`Accept: text/event-stream`，`stream: enable`） | 未配置 `BASE` 时默认 SSE；**已配置 `BASE` 时默认 JSON**（等价于 true） |
 | `VITE_BACKEND_DOC_QBOT_BODY` | 文档分析是否使用与下文章节 4 相同的「qbot 形」JSON | 默认 `true`；`false` 时为简化 JSON（见 5） |
 
 未设置 `VITE_BACKEND_BASE_URL` 时，前端走旧版多环境变量路径，**不在本文档范围**。
@@ -40,7 +41,7 @@
 | 头 | 必填 | 说明 |
 |----|------|------|
 | `Content-Type` | 是 | `application/json; charset=utf-8` |
-| `Accept` | 建议 | 若返回 SSE：`text/event-stream; charset=utf-8`（前端会带此头） |
+| `Accept` | 建议 | **默认 JSON 模式**：`application/json`。仅当 `VITE_BACKEND_USE_JSON_RESPONSE=false` 时为 `text/event-stream; charset=utf-8` |
 | `Authorization` | 条件 | 当 `VITE_BACKEND_API_KEY` 非空：`Bearer <VITE_BACKEND_API_KEY>` |
 
 ### 2.3 字符编码
@@ -61,23 +62,22 @@
 - **请求体**：见 **第 6 节「qbot 形对话请求体」**。
 - **典型 `custom_variables`（由前端传入，均为字符串）**：含 `role`（如 `teacher`）、业务扩展字段等；**不要**把 `evaluation: true` 留在 `custom_variables`（前端会抽出并写入顶层 `evaluation`）。
 
-### 3.1 响应（二选一）
+### 3.1 响应（默认 JSON）
 
-**A. SSE（推荐，与腾讯云 qbot 习惯一致）**
+**A. 单次 JSON（当前默认，配置 `VITE_BACKEND_BASE_URL` 且未将 `VITE_BACKEND_USE_JSON_RESPONSE` 设为 `false`）**
+
+- `Content-Type` 建议 `application/json`（前端亦按文本尝试 `JSON.parse`）。
+- 正文提取与 **情绪**：与历史 SSE 最后一帧规则一致——支持 **Chat Completions 形**（含 `choices[0].message.content`）、`x-debug` / `x_debug` 等（见第 7 节）。
+
+**B. SSE（兼容，仅当 `VITE_BACKEND_USE_JSON_RESPONSE=false`）**
 
 - `Content-Type` 含 `text/event-stream` 或 `application/stream+json`。
-- 帧格式：标准 SSE，`data:` 后为 **单行或多行 JSON**；同一物理行可拼接多个独立 JSON 对象（`}{` 分隔），前端会逐段解析。
-- 语义见 **第 7 节「SSE 解析与展示」**。
-
-**B. 非流式 JSON**
-
-- `Content-Type` 含 `application/json`。
-- 前端从根对象上取 `text` / `content` / `reply` / `message` 或 `payload` 内同名字段，或 **Chat Completions 形** `choices[0].message.content`（见第 7 节）。
+- 帧格式见 **第 7 节「SSE 解析与展示」**。
 
 ### 3.2 人格切换
 
 - 前端会额外向 **同一专项 URL** 发送 `POST`，`content` / `message` 为固定短串「人格切换」，`custom_variables` 含 `role: "persona_switch"` 与 `model: "<人格名>"`。
-- 后端可消费后返回 SSE 或短 JSON；前端对人格切换响应**不做**主对话区强依赖展示。
+- 后端可返回短 JSON 或空 body；JSON 模式下同样使用 `Accept: application/json`。前端对人格切换响应**不做**主对话区强依赖展示。
 
 ---
 
@@ -91,7 +91,7 @@
 
 ### 4.1 响应
 
-- 与 **3.1** 相同：SSE 或 JSON。
+- 与 **3.1** 相同：默认 JSON；可选 SSE（环境变量见上）。
 
 ---
 
@@ -106,7 +106,8 @@
 
 ### 5.1 响应
 
-- 与对话相同：可为 SSE 或单次 JSON；前端对 SSE 会按行解析 `data:` 内 JSON 抽取文本（见 `TeachingDocAnalysis.vue` 内 `sendDocWorkflowWithFileUrl`）。
+- **默认**与专项一致：`Accept: application/json`，单次 JSON 体（`extractWorkflowText` 等解析）。
+- `VITE_BACKEND_USE_JSON_RESPONSE=false` 时仍可返回 SSE；前端会按行解析 `data:`（见 `TeachingDocAnalysis.vue` 内 `sendDocWorkflowWithFileUrl`）。
 
 ### 5.2 上传与凭证（非 BASE 路径）
 
@@ -132,7 +133,7 @@
 | `evaluation` | boolean | 报告类意图为 `true`，普通对话 `false` |
 | `custom_variables` | object | **值均为 string**（对象/数组会被 `JSON.stringify`） |
 | `search_network` | string | 如 `disable` |
-| `stream` | string | 如 `enable` |
+| `stream` | string | JSON 模式下前端发 **`disable`**；SSE 兼容模式下为 **`enable`** |
 | `workflow_status` | string | 如 `enable` / `disable`（前端可经注入配置） |
 | `tcadp_user_id` | string | 常为空串 |
 | `model` | string | 可选顶层字段；课堂缺省为 `李大志` |
@@ -140,9 +141,15 @@
 
 ---
 
-## 7. SSE 解析与展示（前端行为摘要）
+## 7. 响应解析与展示（前端行为摘要）
 
-后端实现 SSE 时，建议兼容下列行为，以便 UI 正确出字与情绪条：
+### 7.1 单次 JSON
+
+- 与 SSE 路径共用 `_parseJsonReplyBodyText`：优先从完整 JSON 中解析助手正文并更新 **x-debug 情绪**（若存在）。
+
+### 7.2 SSE（可选）
+
+在 **`VITE_BACKEND_USE_JSON_RESPONSE=false`** 时，后端实现 SSE 建议兼容下列行为：
 
 1. **事件行**：`event: reply` 或与 JSON 内 `type` 字段同时使用；`type === "error"` 或 `event: error` 会走错误提示。
 2. **`is_from_self`**：payload 上为真时，前端 **忽略**（视为 echo）。
@@ -207,4 +214,4 @@
 
 - 本文档与仓库中 `vendor/front/js/workflow.js`、`src/classroom-workflow-inject.js` 行为一致；若前端升级导致字段增减，请同步更新本文档版本号。
 
-**文档版本**：1.0（与 SimuTeach 仓库内联调后端模式同步）
+**文档版本**：1.1（默认 JSON 响应；SSE 为可选兼容）

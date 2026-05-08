@@ -516,7 +516,7 @@ async function callClassroomBackendDirect({ proactive = true, content = '', mode
   }
   const headers = {
     'Content-Type': 'application/json; charset=utf-8',
-    Accept: 'application/json, text/event-stream; charset=utf-8'
+    Accept: 'application/json',
   }
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`
